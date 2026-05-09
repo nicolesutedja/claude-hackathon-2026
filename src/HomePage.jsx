@@ -774,14 +774,14 @@ function StagePanel({
             Congratulations!
           </h3>
 
-          <p className="mt-3 text-sm leading-6 text-stone-300">
+          <p className="mt-3 text-2xl leading-6 text-stone-300">
             You have been accepted to Capable Credit Corp., a recently founded bank focusing on providing loans. Are you ready to start your shift as a loan officer?
           </p>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <RoundPreview number="1" time="45s" label="Careful review" />
-            <RoundPreview number="2" time="30s" label="Faster quota" />
-            <RoundPreview number="3" time="15s" label="High pressure" />
+            <RoundPreview number="1" time="45s" />
+            <RoundPreview number="2" time="30s" />
+            <RoundPreview number="3" time="15s" />
           </div>
 
           <button
@@ -1141,13 +1141,22 @@ function ApplicantCard({ profile }) {
       </div>
 
       {/* Stats Grid */}
-      <div className="mt-6 grid gap-2 grid-cols-2 lg:grid-cols-3">
-        <DataTile label="Income" value={formatCurrency(profile.monthlyIncome) + "/mo"} />
-        <DataTile label="Credit" value={profile.creditScore} />
-        <DataTile label="Savings" value={formatCurrency(profile.totalSavings)} />
-        <DataTile label="DTI" value={`${Math.round(profile.debtToIncome * 100)}%`} />
-        <DataTile label="Employment" value={`${profile.employmentYears} yrs`} />
-        <DataTile label="ZIP" value={profile.zipCode} />
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <DataTile label="Monthly Income" value={formatCurrency(profile.monthlyIncome)} />
+        <DataTile label="Annual Income" value={formatCurrency(profile.annualIncome)} />
+        <DataTile label="Total Savings" value={formatCurrency(profile.totalSavings)} />
+        <DataTile
+          label="Debt-to-Income"
+          value={`${Math.round(profile.debtToIncome * 100)}%`}
+        />
+        <DataTile label="Credit Score" value={profile.creditScore} />
+        <DataTile label="Rent History" value={`${profile.rentHistoryMonths} months`} />
+        <DataTile
+          label="Employment"
+          value={profile.employmentType?.replace("_", " ")}
+        />
+        <DataTile label="Loan Amount" value={formatCurrency(profile.loanAmount)} />
+        <DataTile label="ZIP Zone" value={profile.zipCode} />
       </div>
     </div>
   );
