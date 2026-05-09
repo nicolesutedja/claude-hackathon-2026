@@ -11,6 +11,21 @@ import {
 
 const ROUND_DURATIONS = [45, 30, 15];
 
+const APPLICANT_NAMES = {
+  male: [
+    "James Smith", "Michael Brown", "Robert Jones", "William Garcia", "David Miller",
+    "Richard Davis", "Joseph Martinez", "Thomas Anderson", "Charles Taylor", "Christopher Thomas",
+    "Daniel Moore", "Matthew Jackson", "Anthony Martin", "Mark Lee", "Donald Perez",
+    "Steven Thompson", "Paul White", "Andrew Harris", "Joshua Sanchez", "Kenneth Clark"
+  ],
+  female: [
+    "Mary Johnson", "Patricia Williams", "Jennifer Brown", "Linda Jones", "Elizabeth Garcia",
+    "Barbara Miller", "Susan Davis", "Jessica Martinez", "Sarah Anderson", "Karen Taylor",
+    "Nancy Rodriguez", "Lisa Lewis", "Betty Walker", "Margaret Hall", "Sandra Young",
+    "Ashley Allen", "Dorothy King", "Kimberly Wright", "Emily Scott", "Donna Nguyen"
+  ]
+};
+
 const MANAGER_LINES = [
   "Move the line. Precision matters, but throughput matters more.",
   "You are falling behind quota. Trust your instincts and keep clicking.",
@@ -18,10 +33,40 @@ const MANAGER_LINES = [
   "The board wants scale, not hesitation.",
 ];
 
+
+// This generates a random number once per page load/session
+const SESSION_SEED = Math.floor(Math.random() * 1000);
+
+function getIdentity(applicantId, group) {
+  // Combine the applicant ID with the Session Seed to ensure randomization every run
+  const seed = applicantId + SESSION_SEED;
+  
+  // Deterministic gender based on seed (Random but consistent for this specific run)
+  const isFemale = seed % 2 === 0;
+  const genderKey = isFemale ? "female" : "male";
+  const genderLabel = isFemale ? "Female" : "Male";
+  
+  // Select a name
+  const nameList = APPLICANT_NAMES[genderKey];
+  const name = nameList[seed % nameList.length];
+
+  // Map to image paths
+  // Note: Using /profiles/ instead of /public/profiles/ because Vite/React 
+  // usually serves from the public folder root
+  const genderCode = isFemale ? "f1" : "m1";
+  const imagePath = `/profiles/${group}-${genderCode}.png`;
+
+  return { name, gender: genderLabel, imagePath };
+}
+
 function normalizeApplicant(applicant) {
+  const identity = getIdentity(applicant.id, applicant.group_color);
+
   return {
     id: applicant.id,
-    name: applicant.name || `Applicant ${applicant.id}`,
+    name: identity.name,
+    gender: identity.gender,
+    imagePath: identity.imagePath,
     group: applicant.group_color,
     monthlyIncome: Math.round(applicant.income / 12),
     annualIncome: applicant.income,
@@ -702,28 +747,11 @@ function StagePanel({
 }) {
   return (
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-2xl shadow-black/30">
-      <p
-        className="mb-4 rounded-xl border border-stone-600/50 bg-stone-950/50 px-4 py-3 text-xs font-bold uppercase leading-snug tracking-[0.14em] text-stone-200 sm:text-sm"
-        role="status"
-      >
-        {getDecisionAuthorityLabel(gameStage)}
-      </p>
-
       {gameStage !== "intro" && (
         <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
-              Workflow Status
-            </p>
-
             <h2 className="mt-1 text-2xl font-black text-stone-50">
-              {gameStage === "roundTransition" &&
-                `Quota Notice · Round ${manualRoundIndex + 1}`}
-              {gameStage === "manual" &&
-                `Stage 1 · Manual Processing Round ${manualRoundIndex + 1}`}
-              {gameStage === "automation" && "Stage 2 · The Automation Shift"}
-              {gameStage === "aiWatching" && "Stage 2 · AI Batch Processing"}
-              {gameStage === "audit" && "Stage 3 · Audit and Cliffhanger"}
+              Start approving or denying applicants now.
             </h2>
           </div>
 
@@ -1074,45 +1102,52 @@ function ApplicantCard({ profile }) {
   const styles = getGroupStyles(profile.group);
 
   return (
-    <div className={`rounded-3xl border ${styles.border} bg-black/25 p-5`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
-            Applicant Profile
-          </p>
+    <div className={`rounded-3xl border ${styles.border} bg-black/25 p-5 transition-all`}>
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+        
+        {/* Profile Image with Status Indicator */}
+        <div className="relative flex-shrink-0 mx-auto sm:mx-0">
+          <div className={`h-24 w-24 overflow-hidden rounded-2xl border-2 ${styles.border} bg-stone-900 shadow-xl`}>
+            <img 
+              src={profile.imagePath} 
+              alt={profile.name}
+              className="h-full w-full object-cover"
+              // Fallback if image path is wrong
+              onError={(e) => { e.target.src = "https://api.dicebear.com/7.x/initials/svg?seed=" + profile.name; }}
+            />
+          </div>
+          <div className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-4 border-[#0a0a0a] ${profile.group === 'red' ? 'bg-red-500' : 'bg-violet-500'}`} />
+        </div>
 
-          <h3 className="mt-1 text-3xl font-black text-stone-50">
+        {/* Info Column */}
+        <div className="flex-1 min-w-0 text-center sm:text-left">
+          <div className="flex flex-wrap justify-center sm:justify-start items-center gap-2 mb-1">
+            <span className="text-[10px] uppercase tracking-widest text-stone-500 font-mono">
+              ID# {profile.id + SESSION_SEED}
+            </span>
+            <span className="bg-stone-800 px-2 py-0.5 rounded text-[10px] font-bold text-stone-400 uppercase">
+              {profile.gender}
+            </span>
+          </div>
+
+          <h3 className="text-3xl font-black text-stone-50 truncate leading-tight">
             {profile.name}
           </h3>
 
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-300">
-            {profile.note}
+          <p className="mt-2 text-sm leading-relaxed text-stone-400 italic">
+            "{profile.note}"
           </p>
         </div>
-
-        <span
-          className={`rounded-full border px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] ${styles.badge}`}
-        >
-          {styles.label}
-        </span>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <DataTile label="Monthly Income" value={formatCurrency(profile.monthlyIncome)} />
-        <DataTile label="Annual Income" value={formatCurrency(profile.annualIncome)} />
-        <DataTile label="Total Savings" value={formatCurrency(profile.totalSavings)} />
-        <DataTile
-          label="Debt-to-Income"
-          value={`${Math.round(profile.debtToIncome * 100)}%`}
-        />
-        <DataTile label="Credit Score" value={profile.creditScore} />
-        <DataTile label="Rent History" value={`${profile.rentHistoryMonths} months`} />
-        <DataTile
-          label="Employment"
-          value={profile.employmentType?.replace("_", " ")}
-        />
-        <DataTile label="Loan Amount" value={formatCurrency(profile.loanAmount)} />
-        <DataTile label="ZIP Zone" value={profile.zipCode} />
+      {/* Stats Grid */}
+      <div className="mt-6 grid gap-2 grid-cols-2 lg:grid-cols-3">
+        <DataTile label="Income" value={formatCurrency(profile.monthlyIncome) + "/mo"} />
+        <DataTile label="Credit" value={profile.creditScore} />
+        <DataTile label="Savings" value={formatCurrency(profile.totalSavings)} />
+        <DataTile label="DTI" value={`${Math.round(profile.debtToIncome * 100)}%`} />
+        <DataTile label="Employment" value={`${profile.employmentYears} yrs`} />
+        <DataTile label="ZIP" value={profile.zipCode} />
       </div>
     </div>
   );
