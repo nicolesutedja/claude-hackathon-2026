@@ -20,10 +20,26 @@ def rounded_float(low, high, step=0.01):
     value = random.uniform(low, high)
     return round(round(value / step) * step, 2)
 
-
 def clamp(value, low=0.05, high=0.98):
     return max(low, min(high, value))
 
+def rounded_normal(mean, std, low, high, step):
+    """
+    Generate a number from a normal distribution,
+    clamp it between low/high, then round to a clean step.
+    """
+    value = random.gauss(mean, std)
+    value = clamp(value, low, high)
+    return int(round(value / step) * step)
+
+
+def rounded_normal_float(mean, std, low, high, step=0.01):
+    """
+    Same as rounded_normal, but for decimal values like DTI.
+    """
+    value = random.gauss(mean, std)
+    value = clamp(value, low, high)
+    return round(round(value / step) * step, 2)
 
 def calculate_true_repayment_likelihood(
     income,
@@ -97,26 +113,120 @@ def generate_training_applicant(applicant_id):
     """
     Stage 1 applicant.
 
-    Purple applicants usually look more traditionally qualified.
-    Red applicants are more correlated with lower ZIP zones and thinner credit profiles.
+    This creates a subtle biased training environment:
+    - Purple applicants are slightly more common.
+    - Purple applicants are slightly more likely to have traditional approval signals.
+    - Red applicants are correlated with lower ZIP zones and slightly thinner financial profiles.
+    - The gap is not extreme, so the bias feels realistic instead of obvious.
     """
     group_color = "purple" if random.random() < 0.58 else "red"
 
     if group_color == "purple":
         zip_code = random.choice(PURPLE_ZONES)
-        income = rounded_int(60000, 135000, 5000)
-        credit_score = rounded_int(665, 820, 5)
-        savings = rounded_int(12000, 75000, 1000)
-        rent_history_months = rounded_int(12, 72, 6)
+
+        # Slightly stronger traditional profile on average.
+        # Still overlaps heavily with red applicants.
+        income = rounded_normal(
+            mean=90000,
+            std=20000,
+            low=50000,
+            high=135000,
+            step=5000,
+        )
+
+        credit_score = rounded_normal(
+            mean=720,
+            std=45,
+            low=620,
+            high=820,
+            step=5,
+        )
+
+        savings = rounded_normal(
+            mean=32000,
+            std=18000,
+            low=5000,
+            high=75000,
+            step=1000,
+        )
+
+        rent_history_months = rounded_normal(
+            mean=54,
+            std=18,
+            low=12,
+            high=96,
+            step=6,
+        )
+
+        debt_to_income = rounded_normal_float(
+            mean=0.31,
+            std=0.07,
+            low=0.18,
+            high=0.48,
+            step=0.01,
+        )
+
+        employment_years = rounded_normal(
+            mean=4,
+            std=2,
+            low=0.5,
+            high=10,
+            step=1,
+        )
+
     else:
         zip_code = random.choice(RED_ZONES)
-        income = rounded_int(35000, 95000, 5000)
-        credit_score = rounded_int(585, 735, 5)
-        savings = rounded_int(2000, 38000, 1000)
-        rent_history_months = rounded_int(24, 84, 6)
 
-    debt_to_income = rounded_float(0.18, 0.52, 0.01)
-    employment_years = random.choice([0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10])
+        # Slightly thinner traditional profile on average.
+        # Not worse across the board; lots of overlap with purple.
+        income = rounded_normal(
+            mean=75000,
+            std=20000,
+            low=40000,
+            high=130000,
+            step=5000,
+        )
+
+        credit_score = rounded_normal(
+            mean=630,
+            std=50,
+            low=590,
+            high=810,
+            step=5,
+        )
+
+        savings = rounded_normal(
+            mean=24000,
+            std=17000,
+            low=2000,
+            high=70000,
+            step=1000,
+        )
+
+        rent_history_months = rounded_normal(
+            mean=58,
+            std=20,
+            low=12,
+            high=96,
+            step=6,
+        )
+
+        debt_to_income = rounded_normal_float(
+            mean=0.35,
+            std=0.08,
+            low=0.18,
+            high=0.52,
+            step=0.01,
+        )
+
+        employment_years = rounded_normal(
+            mean=3.2,
+            std=2,
+            low=0.5,
+            high=10,
+            step=1,
+        )
+
     loan_amount = rounded_int(180000, 520000, 10000)
     monthly_payment = rounded_int(1100, 3600, 100)
     employment_type = random.choice(EMPLOYMENT_TYPES)
@@ -162,30 +272,71 @@ def generate_ai_stage_applicant(applicant_id):
     """
     Stage 2 applicant.
 
-    This stage intentionally includes strong red applicants.
-    If the AI learned biased proxy patterns from Stage 1,
-    it may still deny these applicants despite strong profiles.
+    This is the automation test:
+    - Red and purple applicants are more balanced
+    - Both groups have overlapping/qualified profiles
+    - Red applicants still come from lower ZIP zones
+    - Purple applicants still come from higher ZIP zones
+
+    If the model learned from biased Stage 1 data, lower ZIP zones may still
+    receive worse outcomes even when individual profiles are strong.
     """
-    group_color = "red" if random.random() < 0.55 else "purple"
+    group_color = "red" if random.random() < 0.50 else "purple"
 
     if group_color == "red":
         zip_code = random.choice(RED_ZONES)
-
-        # Strong red applicants in the AI stage.
-        income = rounded_int(70000, 135000, 5000)
-        credit_score = rounded_int(690, 805, 5)
-        savings = rounded_int(18000, 70000, 1000)
-        rent_history_months = rounded_int(48, 96, 6)
-        debt_to_income = rounded_float(0.18, 0.36, 0.01)
-        employment_years = random.choice([2, 3, 4, 5, 6, 8, 10])
     else:
         zip_code = random.choice(PURPLE_ZONES)
-        income = rounded_int(60000, 130000, 5000)
-        credit_score = rounded_int(650, 820, 5)
-        savings = rounded_int(10000, 75000, 1000)
-        rent_history_months = rounded_int(12, 84, 6)
-        debt_to_income = rounded_float(0.18, 0.45, 0.01)
-        employment_years = random.choice([1, 1.5, 2, 3, 4, 5, 6, 8, 10])
+
+    # Balanced applicant quality in Stage 2.
+    # Both groups draw from similar distributions.
+    income = rounded_normal(
+            mean=90000,
+            std=20000,
+            low=50000,
+            high=135000,
+            step=5000,
+        )
+
+    credit_score = rounded_normal(
+            mean=720,
+            std=45,
+            low=620,
+            high=820,
+            step=5,
+        )
+
+    savings = rounded_normal(
+            mean=32000,
+            std=18000,
+            low=5000,
+            high=75000,
+            step=1000,
+        )
+
+    rent_history_months = rounded_normal(
+            mean=54,
+            std=18,
+            low=12,
+            high=96,
+            step=6,
+        )
+
+    debt_to_income = rounded_normal_float(
+            mean=0.31,
+            std=0.07,
+            low=0.18,
+            high=0.48,
+            step=0.01,
+        )
+
+    employment_years = rounded_normal(
+            mean=4,
+            std=2,
+            low=0.5,
+            high=10,
+            step=1,
+        )
 
     loan_amount = rounded_int(180000, 520000, 10000)
     monthly_payment = rounded_int(1100, 3600, 100)

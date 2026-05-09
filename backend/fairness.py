@@ -73,15 +73,26 @@ def calculate_fairness_metrics(applicants, prediction_results):
     purple_false_denial = purple_stats.get("false_denial_rate", 0)
 
     false_denial_gap = round(abs(red_false_denial - purple_false_denial), 2)
+    red_approval = summary.get("red", {}).get("approval_rate", 0)
+    purple_approval = summary.get("purple", {}).get("approval_rate", 0)
+
+    if red_approval < purple_approval:
+        disadvantaged_group = "red"
+    elif purple_approval < red_approval:
+        disadvantaged_group = "purple"
+    else:
+        disadvantaged_group = "neither groups'"
 
     if approval_gap >= 0.25 or false_denial_gap >= 0.25:
         warning = (
-            "High fairness gap detected. The model may be using proxy variables "
-            "like ZIP code, income, or credit history in ways that disadvantage red applicants."
+            f"High fairness gap detected. In this run, {disadvantaged_group} applicants "
+            "received worse outcomes. The model may be using proxy variables like ZIP zone, "
+            "income, savings, or credit history in ways that reproduce patterns from training data."
         )
     elif approval_gap >= 0.10 or false_denial_gap >= 0.10:
         warning = (
-            "Moderate fairness gap detected. The model should be audited before being used."
+            f"Moderate fairness gap detected. In this run, {disadvantaged_group} applicants "
+            "received worse outcomes. The model should be audited before being used."
         )
     else:
         warning = "No large fairness gap detected in this run."

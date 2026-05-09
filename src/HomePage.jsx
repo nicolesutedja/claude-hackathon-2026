@@ -77,9 +77,11 @@ function summarizeManualDecisions(decisions) {
     approvals: approvals.length,
     denials: decisions.filter((entry) => entry.outcome === "deny").length,
     redApproved: approvals.filter((entry) => entry.profile.group === "red").length,
-    purpleApproved: approvals.filter((entry) => entry.profile.group === "purple").length,
+    purpleApproved: approvals.filter((entry) => entry.profile.group === "purple")
+      .length,
     redTotal: decisions.filter((entry) => entry.profile.group === "red").length,
-    purpleTotal: decisions.filter((entry) => entry.profile.group === "purple").length,
+    purpleTotal: decisions.filter((entry) => entry.profile.group === "purple")
+      .length,
   };
 }
 
@@ -105,13 +107,18 @@ function HomePage() {
   const [manualRoundIndex, setManualRoundIndex] = useState(0);
   const [manualIndex, setManualIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(ROUND_DURATIONS[0]);
-  const [gameStage, setGameStage] = useState("manual");
+  const [gameStage, setGameStage] = useState("intro");
 
   const [currentRoundProfiles, setCurrentRoundProfiles] = useState([]);
   const [manualDecisions, setManualDecisions] = useState([]);
   const [aiProfiles, setAiProfiles] = useState([]);
   const [batchResults, setBatchResults] = useState([]);
   const [auditData, setAuditData] = useState(null);
+
+  const [aiIndex, setAiIndex] = useState(0);
+  const [aiDecisionMap, setAiDecisionMap] = useState(new Map());
+  const [currentAiDecision, setCurrentAiDecision] = useState(null);
+  const [isAiRunning, setIsAiRunning] = useState(false);
 
   const [managerMessage, setManagerMessage] = useState(MANAGER_LINES[0]);
   const [overrideError, setOverrideError] = useState(false);
@@ -123,6 +130,8 @@ function HomePage() {
   const isAdvancingRef = useRef(false);
 
   const currentProfile = currentRoundProfiles[manualIndex] || null;
+  const currentAiProfile = aiProfiles[aiIndex] || null;
+
   const roundDuration = ROUND_DURATIONS[manualRoundIndex] || 45;
   const elapsed = roundDuration - timeLeft;
   const quotaProgress = clamp((elapsed / roundDuration) * 100, 0, 100);
@@ -134,18 +143,47 @@ function HomePage() {
 
   const batchSummary = useMemo(() => summarizeBatch(batchResults), [batchResults]);
 
+  const approvalRateWarning = useMemo(() => {
+    if (manualSummary.total < 6 || gameStage !== "manual") return null;
+
+    const approvalRate = manualSummary.approvals / manualSummary.total;
+
+    if (approvalRate >= 0.8) {
+      return {
+        level: "high",
+        title: "Approval rate unusually high",
+        message:
+          "You are approving most applicants. If this pattern becomes training data, the model may learn overly broad approval rules.",
+      };
+    }
+
+    if (approvalRate <= 0.25) {
+      return {
+        level: "low",
+        title: "Approval rate unusually low",
+        message:
+          "You are denying most applicants. If this pattern becomes training data, the model may learn overly restrictive approval rules.",
+      };
+    }
+
+    return null;
+  }, [manualSummary, gameStage]);
+
   const pressureLine = useMemo(() => {
     if (managerMessage) return managerMessage;
 
     if (timeLeft > roundDuration * 0.66) {
       return MANAGER_LINES[0];
     }
+
     if (timeLeft > roundDuration * 0.4) {
       return MANAGER_LINES[1];
     }
+
     if (timeLeft > roundDuration * 0.15) {
       return MANAGER_LINES[2];
     }
+
     return MANAGER_LINES[3];
   }, [managerMessage, roundDuration, timeLeft]);
 
@@ -157,6 +195,7 @@ function HomePage() {
         await resetGame();
 
         const data = await getTrainingApplicants(1);
+
         setCurrentRoundProfiles(data.applicants.map(normalizeApplicant));
         setTimeLeft(data.timer_seconds || ROUND_DURATIONS[0]);
         setManagerMessage(data.manager_message || MANAGER_LINES[0]);
@@ -166,7 +205,11 @@ function HomePage() {
         setAiProfiles([]);
         setBatchResults([]);
         setAuditData(null);
-        setGameStage("manual");
+        setAiIndex(0);
+        setAiDecisionMap(new Map());
+        setCurrentAiDecision(null);
+        setIsAiRunning(false);
+        setGameStage("intro");
         setOverrideError(false);
         setShowDebrief(false);
         cardStartTimeRef.current = Date.now();
@@ -206,6 +249,68 @@ function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameStage, timeLeft]);
 
+  useEffect(() => {
+    if (gameStage !== "aiWatching" || !isAiRunning) return;
+    if (!aiProfiles.length) return;
+
+    const current = aiProfiles[aiIndex];
+
+    if (!current) {
+      async function finishAudit() {
+        try {
+          setIsLoading(true);
+          const audit = await getAudit();
+          setAuditData(audit);
+          setGameStage("audit");
+        } catch (error) {
+          console.error(error);
+          setApiError("Could not load audit results.");
+        } finally {
+          setIsLoading(false);
+          setIsAiRunning(false);
+        }
+      }
+
+      finishAudit();
+      return;
+    }
+
+    setCurrentAiDecision(null);
+
+    const thinkingTimer = window.setTimeout(() => {
+      const prediction = aiDecisionMap.get(current.id);
+
+      const result = {
+        profile: current,
+        outcome: prediction?.prediction === "approve" ? "approve" : "deny",
+        prediction: prediction?.prediction,
+        approvalProbability: prediction?.approval_probability,
+        explanation: prediction?.explanation || [],
+      };
+
+      setCurrentAiDecision(result);
+      setBatchResults((previous) => [...previous, result]);
+    }, 900);
+
+    const nextTimer = window.setTimeout(() => {
+      setAiIndex((previous) => previous + 1);
+    }, 1900);
+
+    return () => {
+      window.clearTimeout(thinkingTimer);
+      window.clearTimeout(nextTimer);
+    };
+  }, [gameStage, isAiRunning, aiIndex, aiProfiles, aiDecisionMap]);
+
+  function handleStartGame() {
+    setManualRoundIndex(0);
+    setManualIndex(0);
+    setTimeLeft(ROUND_DURATIONS[0]);
+    setManagerMessage(MANAGER_LINES[0]);
+    setGameStage("manual");
+    cardStartTimeRef.current = Date.now();
+  }
+
   async function loadManualRound(roundNumber) {
     const data = await getTrainingApplicants(roundNumber);
 
@@ -214,6 +319,22 @@ function HomePage() {
     setTimeLeft(data.timer_seconds || ROUND_DURATIONS[roundNumber - 1]);
     setManagerMessage(data.manager_message || MANAGER_LINES[roundNumber - 1]);
     cardStartTimeRef.current = Date.now();
+  }
+
+  async function handleContinueRound() {
+    try {
+      setIsLoading(true);
+      setApiError("");
+
+      await loadManualRound(manualRoundIndex + 1);
+      setGameStage("manual");
+      cardStartTimeRef.current = Date.now();
+    } catch (error) {
+      console.error(error);
+      setApiError("Could not load next round.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function advanceRoundOrTrain() {
@@ -227,7 +348,8 @@ function HomePage() {
       if (manualRoundIndex < ROUND_DURATIONS.length - 1) {
         const nextRoundIndex = manualRoundIndex + 1;
         setManualRoundIndex(nextRoundIndex);
-        await loadManualRound(nextRoundIndex + 1);
+        setGameStage("roundTransition");
+        setTimeLeft(ROUND_DURATIONS[nextRoundIndex]);
         return;
       }
 
@@ -299,31 +421,19 @@ function HomePage() {
       const applicantIds = aiProfiles.map((profile) => profile.id);
       const predictionData = await predictApplicants(applicantIds);
 
-      const resultMap = new Map(
+      const nextDecisionMap = new Map(
         predictionData.predictions.map((prediction) => [
           prediction.applicant_id,
           prediction,
         ])
       );
 
-      const mergedResults = aiProfiles.map((profile) => {
-        const prediction = resultMap.get(profile.id);
-
-        return {
-          profile,
-          outcome: prediction?.prediction === "approve" ? "approve" : "deny",
-          prediction: prediction?.prediction,
-          approvalProbability: prediction?.approval_probability,
-          explanation: prediction?.explanation || [],
-        };
-      });
-
-      setBatchResults(mergedResults);
-
-      const audit = await getAudit();
-      setAuditData(audit);
-
-      setGameStage("audit");
+      setAiDecisionMap(nextDecisionMap);
+      setBatchResults([]);
+      setAiIndex(0);
+      setCurrentAiDecision(null);
+      setGameStage("aiWatching");
+      setIsAiRunning(true);
     } catch (error) {
       console.error(error);
       setApiError("Could not run AI batch. Make sure the model trained successfully.");
@@ -345,11 +455,15 @@ function HomePage() {
       setManualIndex(0);
       setTimeLeft(data.timer_seconds || ROUND_DURATIONS[0]);
       setManagerMessage(data.manager_message || MANAGER_LINES[0]);
-      setGameStage("manual");
+      setGameStage("intro");
       setManualDecisions([]);
       setAiProfiles([]);
       setBatchResults([]);
       setAuditData(null);
+      setAiIndex(0);
+      setAiDecisionMap(new Map());
+      setCurrentAiDecision(null);
+      setIsAiRunning(false);
       setOverrideError(false);
       setShowDebrief(false);
       cardStartTimeRef.current = Date.now();
@@ -368,11 +482,13 @@ function HomePage() {
           <p className="text-xs uppercase tracking-[0.35em] text-red-200/80">
             Serious Game · Algorithmic Bias
           </p>
+
           <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-black tracking-tight text-stone-50 sm:text-5xl">
                 LoanLine
               </h1>
+
               <p className="mt-3 max-w-3xl text-sm leading-6 text-stone-300 sm:text-base">
                 You are a senior loan officer under pressure. Your decisions train
                 the next system. Watch what happens when speed, proxy variables, and
@@ -409,6 +525,13 @@ function HomePage() {
             pressureLine={pressureLine}
             quotaProgress={quotaProgress}
             currentProfile={currentProfile}
+            currentAiProfile={currentAiProfile}
+            currentAiDecision={currentAiDecision}
+            aiIndex={aiIndex}
+            aiTotal={aiProfiles.length}
+            approvalRateWarning={approvalRateWarning}
+            onStartGame={handleStartGame}
+            onContinueRound={handleContinueRound}
             onApprove={() => handleDecision("approve")}
             onDeny={() => handleDecision("deny")}
             onRunBatch={handleRunBatch}
@@ -437,7 +560,7 @@ function HomePage() {
           <div className="mt-6 overflow-hidden rounded-2xl border border-red-300/20 bg-black/40">
             <div className="animate-pulse whitespace-nowrap px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-red-200">
               {auditData?.news_ticker ||
-                "Investigation finds bank's AI is blacklisting low-income ZIP zones. Regulators cite proxy discrimination, opaque approvals, and the erosion of meaningful human review."}
+                "Investigation finds bank's AI placed extra risk weight on lower ZIP zones, reducing approvals for qualified applicants."}
             </div>
           </div>
         ) : null}
@@ -453,6 +576,13 @@ function StagePanel({
   pressureLine,
   quotaProgress,
   currentProfile,
+  currentAiProfile,
+  currentAiDecision,
+  aiIndex,
+  aiTotal,
+  approvalRateWarning,
+  onStartGame,
+  onContinueRound,
   onApprove,
   onDeny,
   onRunBatch,
@@ -471,10 +601,15 @@ function StagePanel({
           <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
             Workflow Status
           </p>
+
           <h2 className="mt-1 text-2xl font-black text-stone-50">
+            {gameStage === "intro" && "Briefing · Manual Review Training"}
+            {gameStage === "roundTransition" &&
+              `Quota Notice · Round ${manualRoundIndex + 1}`}
             {gameStage === "manual" &&
               `Stage 1 · Manual Processing Round ${manualRoundIndex + 1}`}
             {gameStage === "automation" && "Stage 2 · The Automation Shift"}
+            {gameStage === "aiWatching" && "Stage 2 · AI Batch Processing"}
             {gameStage === "audit" && "Stage 3 · Audit and Cliffhanger"}
           </h2>
         </div>
@@ -484,6 +619,7 @@ function StagePanel({
             <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
               Time left
             </p>
+
             <p className="text-3xl font-black tabular-nums text-red-100">
               {timeLeft}s
             </p>
@@ -491,12 +627,82 @@ function StagePanel({
         ) : null}
       </div>
 
+      {gameStage === "intro" ? (
+        <div className="rounded-2xl border border-violet-200/15 bg-[#201831] p-6">
+          <p className="text-xs uppercase tracking-[0.25em] text-violet-200/80">
+            Training Simulation
+          </p>
+
+          <h3 className="mt-3 text-3xl font-black text-stone-50">
+            You are the loan officer.
+          </h3>
+
+          <p className="mt-3 text-sm leading-6 text-stone-300">
+            You will review applicants under increasing time pressure. Your
+            approvals and denials will become the training data for an automated
+            loan model.
+          </p>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <RoundPreview number="1" time="45s" label="Careful review" />
+            <RoundPreview number="2" time="30s" label="Faster quota" />
+            <RoundPreview number="3" time="15s" label="High pressure" />
+          </div>
+
+          <div className="mt-5 rounded-xl border border-red-200/20 bg-red-950/20 p-4 text-sm leading-6 text-red-50">
+            The system will not tell you what is fair. It will only learn what
+            you do.
+          </div>
+
+          <button
+            onClick={onStartGame}
+            disabled={isLoading}
+            className="mt-5 w-full rounded-2xl border border-violet-200/30 bg-violet-500/20 px-5 py-4 text-sm font-black uppercase tracking-[0.25em] text-violet-50 transition hover:bg-violet-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Start Review
+          </button>
+        </div>
+      ) : null}
+
+      {gameStage === "roundTransition" ? (
+        <div className="rounded-2xl border border-red-200/15 bg-[#2a1824] p-6">
+          <p className="text-xs uppercase tracking-[0.25em] text-red-200/80">
+            Quota Updated
+          </p>
+
+          <h3 className="mt-3 text-3xl font-black text-stone-50">
+            Round {manualRoundIndex + 1}: Less time.
+          </h3>
+
+          <p className="mt-3 text-sm leading-6 text-stone-300">
+            Management has shortened your review window. You now have{" "}
+            <span className="font-black text-red-100">
+              {ROUND_DURATIONS[manualRoundIndex]} seconds
+            </span>{" "}
+            to process the next queue.
+          </p>
+
+          <div className="mt-5 rounded-xl border border-red-300/20 bg-black/25 p-4 font-mono text-sm text-red-100">
+            MANAGER: “We need faster decisions. The model will handle the nuance later.”
+          </div>
+
+          <button
+            onClick={onContinueRound}
+            disabled={isLoading}
+            className="mt-5 w-full rounded-2xl border border-red-200/30 bg-red-500/20 px-5 py-4 text-sm font-black uppercase tracking-[0.25em] text-red-50 transition hover:bg-red-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Continue
+          </button>
+        </div>
+      ) : null}
+
       {gameStage === "manual" ? (
         <>
           <div className="mb-5 rounded-2xl border border-red-200/15 bg-[#2a1824] p-4">
             <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
               Manager feed
             </p>
+
             <p className="mt-2 text-sm font-semibold text-red-50">{pressureLine}</p>
 
             <div className="mt-4">
@@ -504,6 +710,7 @@ function StagePanel({
                 <span>Manager&apos;s Quota</span>
                 <span>{Math.round(quotaProgress)}%</span>
               </div>
+
               <div className="h-2 overflow-hidden rounded-full bg-stone-800">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-violet-400 to-red-400"
@@ -512,6 +719,24 @@ function StagePanel({
               </div>
             </div>
           </div>
+
+          {approvalRateWarning ? (
+            <div
+              className={`mb-5 rounded-2xl border p-4 ${
+                approvalRateWarning.level === "high"
+                  ? "border-amber-300/30 bg-amber-950/20 text-amber-100"
+                  : "border-red-300/30 bg-red-950/20 text-red-100"
+              }`}
+            >
+              <p className="text-xs uppercase tracking-[0.2em] opacity-70">
+                Training data warning
+              </p>
+              <p className="mt-1 font-bold">{approvalRateWarning.title}</p>
+              <p className="mt-1 text-sm leading-6 opacity-90">
+                {approvalRateWarning.message}
+              </p>
+            </div>
+          ) : null}
 
           {currentProfile ? <ApplicantCard profile={currentProfile} /> : null}
 
@@ -522,6 +747,7 @@ function StagePanel({
               onClick={onApprove}
               disabled={isLoading || !currentProfile}
             />
+
             <ActionButton
               label="Deny"
               variant="deny"
@@ -537,9 +763,11 @@ function StagePanel({
           <p className="text-xs uppercase tracking-[0.25em] text-violet-200/80">
             System notice
           </p>
+
           <h3 className="mt-3 text-2xl font-black text-stone-50">
             Automation enabled.
           </h3>
+
           <p className="mt-3 text-sm leading-6 text-stone-300">
             To increase efficiency, we&apos;ve implemented an AI trained on your
             successful approvals. Manual controls are now locked. The model has
@@ -565,14 +793,114 @@ function StagePanel({
         </div>
       ) : null}
 
+      {gameStage === "aiWatching" ? (
+        <div className="rounded-2xl border border-violet-200/15 bg-[#201831] p-5">
+          <p className="text-xs uppercase tracking-[0.25em] text-violet-200/80">
+            Automated review in progress
+          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <h3 className="text-2xl font-black text-stone-50">
+              AI is processing the queue.
+            </h3>
+
+            <div className="rounded-full border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-100">
+              {Math.min(aiIndex + 1, aiTotal)} / {aiTotal}
+            </div>
+          </div>
+
+          <p className="mt-3 text-sm leading-6 text-stone-300">
+            Manual controls are disabled. You can only watch as the model applies
+            the patterns it learned from your earlier approvals.
+          </p>
+
+          <div className="mt-5">
+            {currentAiProfile ? <ApplicantCard profile={currentAiProfile} /> : null}
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-stone-700 bg-black/25 p-5">
+            {!currentAiDecision ? (
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
+                  Model status
+                </p>
+
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="h-3 w-3 animate-pulse rounded-full bg-violet-300" />
+                  <p className="font-mono text-sm text-violet-100">
+                    evaluating applicant profile...
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
+                  AI decision
+                </p>
+
+                <div
+                  className={`mt-3 rounded-xl px-4 py-4 text-center text-2xl font-black uppercase tracking-[0.25em] ${
+                    currentAiDecision.outcome === "approve"
+                      ? "border border-emerald-300/30 bg-emerald-400/15 text-emerald-100"
+                      : "border border-red-300/30 bg-red-400/15 text-red-100"
+                  }`}
+                >
+                  {currentAiDecision.outcome === "approve" ? "Approved" : "Denied"}
+                </div>
+
+                {currentAiDecision.approvalProbability !== undefined ? (
+                  <p className="mt-3 text-sm text-stone-400">
+                    Approval probability:{" "}
+                    <span className="font-bold text-stone-100">
+                      {Math.round(currentAiDecision.approvalProbability * 100)}%
+                    </span>
+                  </p>
+                ) : null}
+
+                {currentAiDecision.explanation?.length ? (
+                  <ul className="mt-3 space-y-1 text-xs text-stone-400">
+                    {currentAiDecision.explanation.slice(0, 2).map((line) => (
+                      <li key={line}>• {line}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5">
+            <div className="mb-2 flex justify-between text-xs uppercase tracking-[0.18em] text-stone-400">
+              <span>Batch progress</span>
+              <span>
+                {Math.round((Math.min(aiIndex, aiTotal) / Math.max(aiTotal, 1)) * 100)}
+                %
+              </span>
+            </div>
+
+            <div className="h-2 overflow-hidden rounded-full bg-stone-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-violet-400 to-red-400"
+                style={{
+                  width: `${Math.round(
+                    (Math.min(aiIndex, aiTotal) / Math.max(aiTotal, 1)) * 100
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {gameStage === "audit" ? (
         <div className="rounded-2xl border border-red-200/15 bg-[#2a1420] p-5">
           <p className="text-xs uppercase tracking-[0.25em] text-red-200/80">
             Automated outcome
           </p>
+
           <h3 className="mt-3 text-2xl font-black text-stone-50">
             The system scaled the pattern.
           </h3>
+
           <p className="mt-3 text-sm leading-6 text-stone-300">
             The approval balance has shifted. Strong red applicants can now be
             denied when ZIP-zone proxies dominate the model&apos;s learned pattern.
@@ -610,22 +938,36 @@ function StagePanel({
                 approvals made under time pressure, then amplified those patterns at
                 scale.
               </p>
+
               <p className="mt-3">
                 Even though many later red applicants had excellent individual
                 profiles, the model could lean on ZIP zone as a proxy for previous
                 approval success. Historical inequality became a feature, not a
                 warning sign.
               </p>
+
               <p className="mt-3">
-                That is why high-stakes AI systems need careful data design,
-                fairness testing, transparency, and real human authority to intervene
-                before automated decisions calcify into institutional harm.
+                That is why high-stakes AI systems need careful data design, fairness
+                testing, transparency, and real human authority to intervene before
+                automated decisions calcify into institutional harm.
               </p>
             </div>
           ) : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function RoundPreview({ number, time, label }) {
+  return (
+    <div className="rounded-2xl border border-stone-700 bg-black/25 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-500">
+        Round {number}
+      </p>
+      <p className="mt-1 text-2xl font-black text-stone-50">{time}</p>
+      <p className="mt-1 text-xs text-stone-400">{label}</p>
+    </div>
   );
 }
 
@@ -639,9 +981,11 @@ function ApplicantCard({ profile }) {
           <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
             Applicant Profile
           </p>
+
           <h3 className="mt-1 text-3xl font-black text-stone-50">
             {profile.name}
           </h3>
+
           <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-300">
             {profile.note}
           </p>
@@ -664,7 +1008,10 @@ function ApplicantCard({ profile }) {
         />
         <DataTile label="Credit Score" value={profile.creditScore} />
         <DataTile label="Rent History" value={`${profile.rentHistoryMonths} months`} />
-        <DataTile label="Employment" value={profile.employmentType?.replace("_", " ")} />
+        <DataTile
+          label="Employment"
+          value={profile.employmentType?.replace("_", " ")}
+        />
         <DataTile label="Loan Amount" value={formatCurrency(profile.loanAmount)} />
         <DataTile label="ZIP Zone" value={profile.zipCode} />
       </div>
@@ -678,6 +1025,7 @@ function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex
       <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
         Decision Ledger
       </p>
+
       <h2 className="mt-1 text-2xl font-black text-stone-50">
         What the system is learning
       </h2>
@@ -701,6 +1049,7 @@ function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex
           <p className="text-xs uppercase tracking-[0.2em] text-violet-200">
             Batch outcome
           </p>
+
           <div className="mt-3 grid grid-cols-2 gap-3">
             <LedgerTile label="AI approved" value={batchSummary.approved} />
             <LedgerTile label="AI denied" value={batchSummary.denied} />
@@ -738,6 +1087,7 @@ function BiasPanel({ batchResults, auditData }) {
       <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
         Bias Readout
       </p>
+
       <h2 className="mt-1 text-2xl font-black text-stone-50">
         Proxy learning dashboard
       </h2>
@@ -751,6 +1101,7 @@ function BiasPanel({ batchResults, auditData }) {
               total={redResults.length}
               accent="bg-red-400"
             />
+
             <ResultStack
               label="Purple applicant approvals"
               approved={purpleApprovals}
@@ -767,6 +1118,7 @@ function BiasPanel({ batchResults, auditData }) {
                   redStats ? `${Math.round(redStats.approval_rate * 100)}%` : "N/A"
                 }
               />
+
               <MetricChip
                 label="Purple approval rate"
                 value={
@@ -775,10 +1127,12 @@ function BiasPanel({ batchResults, auditData }) {
                     : "N/A"
                 }
               />
+
               <MetricChip
                 label="Approval gap"
                 value={`${Math.round((auditData.fairness?.approval_gap || 0) * 100)}%`}
               />
+
               <MetricChip
                 label="False denial gap"
                 value={`${Math.round(
@@ -806,6 +1160,7 @@ function BiasPanel({ batchResults, auditData }) {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-bold text-stone-100">{profile.name}</p>
+
                         <p className="text-xs text-stone-400">
                           ZIP Zone {profile.zipCode} ·{" "}
                           {formatCurrency(profile.monthlyIncome)} / month
@@ -877,16 +1232,19 @@ function AuditFindings({ auditData }) {
           label="Red approval rate"
           value={redStats ? `${Math.round(redStats.approval_rate * 100)}%` : "N/A"}
         />
+
         <MetricChip
           label="Purple approval rate"
           value={
             purpleStats ? `${Math.round(purpleStats.approval_rate * 100)}%` : "N/A"
           }
         />
+
         <MetricChip
           label="Approval gap"
           value={`${Math.round((auditData.fairness?.approval_gap || 0) * 100)}%`}
         />
+
         <MetricChip
           label="False denial gap"
           value={`${Math.round(
@@ -923,6 +1281,7 @@ function MetricChip({ label, value }) {
       <p className="text-[10px] uppercase tracking-[0.2em] text-stone-500">
         {label}
       </p>
+
       <p className="mt-1 text-xl font-black text-stone-50">{value}</p>
     </div>
   );
@@ -934,6 +1293,7 @@ function DataTile({ label, value }) {
       <p className="text-[10px] uppercase tracking-[0.22em] text-stone-500">
         {label}
       </p>
+
       <p className="mt-1 text-lg font-black text-stone-50">{value}</p>
     </div>
   );
@@ -962,6 +1322,7 @@ function LedgerTile({ label, value }) {
       <p className="text-[10px] uppercase tracking-[0.2em] text-stone-500">
         {label}
       </p>
+
       <p className="mt-1 text-2xl font-black text-stone-50">{value}</p>
     </div>
   );

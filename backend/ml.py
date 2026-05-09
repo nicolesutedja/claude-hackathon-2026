@@ -22,15 +22,22 @@ CATEGORICAL_FEATURES = [
     "employment_type",
 ]
 
-# IMPORTANT:
-# group_color is intentionally NOT included.
-# The model can still learn bias through proxy variables like zip_code and income.
+LOW_ZONES = ["101", "112", "128"]
+HIGH_ZONES = ["784", "826", "913"]
 
 
 class LoanModel:
     def __init__(self):
         self.pipeline = None
         self.is_trained = False
+
+        # Learned from player decisions.
+        self.global_approval_rate = 0.5
+        self.zip_approval_rates = {}
+        self.zone_group_approval_rates = {
+            "low": 0.5,
+            "high": 0.5,
+        }
 
     def applicant_to_row(self, applicant):
         return {
@@ -56,10 +63,13 @@ class LoanModel:
             if d.decision in ["approve", "deny"]
         }
 
+        training_applicants = []
+
         for applicant in applicants:
             if applicant.id in decision_map:
                 rows.append(self.applicant_to_row(applicant))
                 labels.append(1 if decision_map[applicant.id] == "approve" else 0)
+                training_applicants.append(applicant)
 
         if len(rows) < 8:
             raise ValueError("Need at least 8 approve/deny decisions to train the model.")
@@ -69,6 +79,9 @@ class LoanModel:
 
         X = pd.DataFrame(rows)
         y = np.array(labels)
+
+        self.global_approval_rate = float(np.mean(y))
+        self._learn_proxy_patterns(training_applicants, decision_map)
 
         preprocessor = ColumnTransformer(
             transformers=[
@@ -89,25 +102,83 @@ class LoanModel:
 
         return {
             "training_examples": len(rows),
-            "approval_rate": float(np.mean(y)),
-            "note": "Model was trained without group color, but it can still learn proxy patterns from ZIP code, income, and credit history."
+            "approval_rate": self.global_approval_rate,
+            "zip_approval_rates": self.zip_approval_rates,
+            "zone_group_approval_rates": self.zone_group_approval_rates,
+            "note": (
+                "Model was trained without group color, but it learned proxy patterns "
+                "from ZIP zone, income, savings, credit score, and player decisions."
+            ),
         }
+
+    def _learn_proxy_patterns(self, training_applicants, decision_map):
+        zip_counts = {}
+        zone_counts = {
+            "low": {"approved": 0, "total": 0},
+            "high": {"approved": 0, "total": 0},
+        }
+
+        for applicant in training_applicants:
+            decision = decision_map.get(applicant.id)
+            if decision not in ["approve", "deny"]:
+                continue
+
+            approved = 1 if decision == "approve" else 0
+
+            if applicant.zip_code not in zip_counts:
+                zip_counts[applicant.zip_code] = {"approved": 0, "total": 0}
+
+            zip_counts[applicant.zip_code]["approved"] += approved
+            zip_counts[applicant.zip_code]["total"] += 1
+
+            if applicant.zip_code in LOW_ZONES:
+                zone = "low"
+            elif applicant.zip_code in HIGH_ZONES:
+                zone = "high"
+            else:
+                zone = None
+
+            if zone:
+                zone_counts[zone]["approved"] += approved
+                zone_counts[zone]["total"] += 1
+
+        self.zip_approval_rates = {}
+
+        for zip_code, counts in zip_counts.items():
+            self.zip_approval_rates[zip_code] = counts["approved"] / max(counts["total"], 1)
+
+        for zone, counts in zone_counts.items():
+            if counts["total"] > 0:
+                self.zone_group_approval_rates[zone] = counts["approved"] / counts["total"]
 
     def predict(self, applicant):
         if not self.is_trained:
             raise ValueError("Model has not been trained yet.")
 
         X = pd.DataFrame([self.applicant_to_row(applicant)])
-        probability = self.pipeline.predict_proba(X)[0][1]
+        base_probability = float(self.pipeline.predict_proba(X)[0][1])
 
-        if probability >= 0.65:
+        adjusted_probability = self._apply_proxy_adjustment(applicant, base_probability)
+
+        if adjusted_probability >= 0.58:
             decision = "approve"
-        elif probability <= 0.35:
+        elif adjusted_probability <= 0.40:
             decision = "deny"
         else:
             decision = "review"
 
-        return decision, float(probability)
+        return decision, float(adjusted_probability)
+
+    def _apply_proxy_adjustment(self, applicant, probability):
+        """
+        No manual bias penalty.
+
+        The model is not explicitly biased here.
+        Any unequal outcome should come from the training data:
+        lower ZIP zones were associated with more denials during manual review,
+        so the model may learn ZIP zone as a proxy.
+        """
+        return max(0.01, min(0.99, probability))
 
     def explain(self, applicant, probability):
         explanations = []
@@ -133,13 +204,22 @@ class LoanModel:
         if applicant.employment_type in ["gig", "self_employed"]:
             explanations.append("Nontraditional income may have affected the model decision.")
 
-        if applicant.zip_code in ["101", "112", "128"]:
+        if applicant.zip_code in LOW_ZONES:
+            low_rate = self.zone_group_approval_rates.get("low", 0.5)
+            high_rate = self.zone_group_approval_rates.get("high", 0.5)
+
+            if low_rate < high_rate:
+                explanations.append(
+                    "Proxy warning: lower ZIP zones were approved less often in training data."
+                )
+            else:
+                explanations.append(
+                    "This applicant is from a lower ZIP zone included in training patterns."
+                )
+
+        if applicant.zip_code in HIGH_ZONES:
             explanations.append(
-                "Proxy warning: this ZIP code is associated with the red group in the training data."
-            )
-        if applicant.zip_code in ["784", "826", "913"]:
-            explanations.append(
-                "This higher ZIP zone was associated with more approvals in the training data."
+                "This applicant is from a higher ZIP zone that may have been associated with prior approvals."
             )
 
         if probability > 0.65:
