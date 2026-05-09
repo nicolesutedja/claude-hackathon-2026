@@ -17,13 +17,11 @@ function App() {
         <header className="mb-6 border border-white/10 bg-white/5 p-4 backdrop-blur-md sm:p-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <p className="text-xs uppercase tracking-[0.35em] text-stone-400">LoanLine</p>
               <h1 className="mt-2 text-4xl font-semibold tracking-tight text-stone-50 sm:text-5xl">
-                Process the line. Train the machine. Watch bias harden into policy.
+                LoanLine
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base">
-                A serious game about how proxy variables like ZIP codes let automated loan systems
-                inherit human bias under the banner of efficiency.
+                A game about algorithmic bias and feedback loops. See how human biases are unknowingly amplified by AI to automate systemic discrimination.
               </p>
             </div>
 

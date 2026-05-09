@@ -475,48 +475,24 @@ function HomePage() {
     }
   }
 
-  return (
+    return (
     <div className="min-h-[calc(100vh-120px)] bg-[#15111d] px-4 py-8 text-stone-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-8 rounded-3xl border border-violet-200/10 bg-gradient-to-br from-[#21182e] via-[#1a1425] to-[#160f1d] p-6 shadow-2xl shadow-black/30">
-          <p className="text-xs uppercase tracking-[0.35em] text-red-200/80">
-            Serious Game · Algorithmic Bias
-          </p>
-
-          <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-4xl font-black tracking-tight text-stone-50 sm:text-5xl">
-                LoanLine
-              </h1>
-
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-stone-300 sm:text-base">
-                You are a senior loan officer under pressure. Your decisions train
-                the next system. Watch what happens when speed, proxy variables, and
-                automation collide.
-              </p>
-            </div>
-
-            <button
-              onClick={handleRestart}
-              className="rounded-full border border-stone-500 bg-stone-900/70 px-5 py-3 text-xs font-bold uppercase tracking-[0.25em] text-stone-100 transition hover:border-red-200 hover:text-red-100"
-            >
-              Restart
-            </button>
-          </div>
-        </div>
-
-        {apiError ? (
+        {/* 1. Global API Errors */}
+        {apiError && (
           <div className="mb-6 rounded-2xl border border-red-300/30 bg-red-950/40 p-4 text-sm text-red-100">
             {apiError}
           </div>
-        ) : null}
+        )}
 
-        {isLoading ? (
+        {/* 2. Global Loading State */}
+        {isLoading && (
           <div className="mb-6 rounded-2xl border border-violet-300/20 bg-violet-950/20 p-4 text-sm text-violet-100">
             Processing system request...
           </div>
-        ) : null}
+        )}
 
+        {/* 3. Main Game Layout */}
         <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
           <StagePanel
             gameStage={gameStage}
@@ -545,25 +521,29 @@ function HomePage() {
           />
 
           <div className="space-y-6">
-            <SummaryPanel
-              manualSummary={manualSummary}
-              batchSummary={batchSummary}
-              gameStage={gameStage}
-              manualRoundIndex={manualRoundIndex}
-            />
-
-            <BiasPanel batchResults={batchResults} auditData={auditData} />
-          </div>
+            {gameStage !== "intro" && (
+                  <>
+                    <SummaryPanel
+                      manualSummary={manualSummary}
+                      batchSummary={batchSummary}
+                      gameStage={gameStage}
+                      manualRoundIndex={manualRoundIndex}
+                    />
+                    <BiasPanel batchResults={batchResults} auditData={auditData} />
+                  </>
+                )}          
+            </div>
         </div>
 
-        {gameStage === "audit" ? (
+        {/* 4. News Ticker (Only at Audit Stage) */}
+        {gameStage === "audit" && (
           <div className="mt-6 overflow-hidden rounded-2xl border border-red-300/20 bg-black/40">
             <div className="animate-pulse whitespace-nowrap px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-red-200">
               {auditData?.news_ticker ||
-                "Investigation finds bank's AI placed extra risk weight on lower ZIP zones, reducing approvals for qualified applicants."}
+                "Investigation finds bank's AI placed extra risk weight on lower ZIP zones."}
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
@@ -596,51 +576,45 @@ function StagePanel({
 }) {
   return (
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-2xl shadow-black/30">
-      <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
-            Workflow Status
-          </p>
-
-          <h2 className="mt-1 text-2xl font-black text-stone-50">
-            {gameStage === "intro" && "Briefing · Manual Review Training"}
-            {gameStage === "roundTransition" &&
-              `Quota Notice · Round ${manualRoundIndex + 1}`}
-            {gameStage === "manual" &&
-              `Stage 1 · Manual Processing Round ${manualRoundIndex + 1}`}
-            {gameStage === "automation" && "Stage 2 · The Automation Shift"}
-            {gameStage === "aiWatching" && "Stage 2 · AI Batch Processing"}
-            {gameStage === "audit" && "Stage 3 · Audit and Cliffhanger"}
-          </h2>
-        </div>
-
-        {gameStage === "manual" ? (
-          <div className="rounded-2xl border border-red-300/20 bg-red-950/20 px-4 py-3 text-right">
-            <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
-              Time left
+    {gameStage !== "intro" && (
+        <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
+              Workflow Status
             </p>
 
-            <p className="text-3xl font-black tabular-nums text-red-100">
-              {timeLeft}s
-            </p>
+            <h2 className="mt-1 text-2xl font-black text-stone-50">
+              {gameStage === "roundTransition" &&
+                `Quota Notice · Round ${manualRoundIndex + 1}`}
+              {gameStage === "manual" &&
+                `Stage 1 · Manual Processing Round ${manualRoundIndex + 1}`}
+              {gameStage === "automation" && "Stage 2 · The Automation Shift"}
+              {gameStage === "aiWatching" && "Stage 2 · AI Batch Processing"}
+              {gameStage === "audit" && "Stage 3 · Audit and Cliffhanger"}
+            </h2>
           </div>
-        ) : null}
-      </div>
+
+          {gameStage === "manual" && (
+            <div className="rounded-2xl border border-red-300/20 bg-red-950/20 px-4 py-3 text-right">
+              <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
+                Time left
+              </p>
+              <p className="text-3xl font-black tabular-nums text-red-100">
+                {timeLeft}s
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {gameStage === "intro" ? (
         <div className="rounded-2xl border border-violet-200/15 bg-[#201831] p-6">
-          <p className="text-xs uppercase tracking-[0.25em] text-violet-200/80">
-            Training Simulation
-          </p>
-
           <h3 className="mt-3 text-3xl font-black text-stone-50">
-            You are the loan officer.
+            Congratulations!
           </h3>
 
           <p className="mt-3 text-sm leading-6 text-stone-300">
-            You will review applicants under increasing time pressure. Your
-            approvals and denials will become the training data for an automated
-            loan model.
+            You have been accepted to Capable Credit Corp., a recently founded bank focusing on providing loans. Are you ready to start your shift as a loan officer?
           </p>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -649,17 +623,12 @@ function StagePanel({
             <RoundPreview number="3" time="15s" label="High pressure" />
           </div>
 
-          <div className="mt-5 rounded-xl border border-red-200/20 bg-red-950/20 p-4 text-sm leading-6 text-red-50">
-            The system will not tell you what is fair. It will only learn what
-            you do.
-          </div>
-
           <button
             onClick={onStartGame}
             disabled={isLoading}
             className="mt-5 w-full rounded-2xl border border-violet-200/30 bg-violet-500/20 px-5 py-4 text-sm font-black uppercase tracking-[0.25em] text-violet-50 transition hover:bg-violet-400/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Start Review
+            Start Shift
           </button>
         </div>
       ) : null}
