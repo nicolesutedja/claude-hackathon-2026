@@ -41,4 +41,28 @@ Given another week, we want to expand LoanLine by adding more diverse risk facto
 
 ## How to run it
 
+LoanLine has a React frontend and a FastAPI backend. Run both at the same time.
+1. Install dependencies
+```
+git clone https://github.com/nicolesutedja/claude-hackathon-2026.git
+cd claude-hackathon-2026
+npm install
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+2. Start the backend
+In one terminal:
+```
+uvicorn backend.main:app --reload
+```
+
+3. Start the frontend
+In a second terminal:
+```
+npm run dev
+```
+
+4. Open the frontend link: http://localhost:5173
+
 
