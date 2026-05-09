@@ -784,7 +784,7 @@ function ManagerDialoguePopup({ dialogue, expanded }) {
             expanded ? "text-[11px] sm:text-xs" : "text-[10px]"
           }`}
         >
-          Branch manager
+          Manager
         </p>
         <p
           className={`relative mt-2 font-semibold leading-snug text-stone-50 transition-[font-size,margin-top] duration-500 ease-out motion-reduce:transition-none ${
@@ -797,7 +797,6 @@ function ManagerDialoguePopup({ dialogue, expanded }) {
         </p>
       </div>
 
-      {/* Portrait placeholder — swap for manager art when ready */}
       <div className="shrink-0">
         <div
           className={`flex flex-col items-center justify-center rounded-xl border-2 border-red-500/35 bg-[#2a1824] shadow-[0_8px_24px_rgba(0,0,0,0.45)] shadow-inner shadow-black/30 ease-out motion-reduce:transition-none ${
@@ -806,12 +805,15 @@ function ManagerDialoguePopup({ dialogue, expanded }) {
               : "h-[5.5rem] w-[4.5rem] sm:h-28 sm:w-24"
           } transition-[height,width] duration-500`}
         >
-          <div
-            className={`rounded-full border-2 border-dashed border-stone-500/60 bg-stone-800/80 ease-out motion-reduce:transition-none ${
+          {/* Manager Portrait Image */}
+          <img
+            src="/profiles/boss.png"
+            alt="Manager Portrait"
+            className={`rounded-full border-2 border-stone-500/60 bg-stone-800/80 object-cover ease-out motion-reduce:transition-none ${
               expanded ? "h-14 w-14 sm:h-[4.25rem] sm:w-[4.25rem]" : "h-12 w-12 sm:h-14 sm:w-14"
             } transition-[height,width] duration-500`}
-            aria-hidden
           />
+
           <p
             className={`font-bold uppercase tracking-[0.14em] text-stone-500 transition-[font-size,margin-top] duration-500 ease-out motion-reduce:transition-none ${
               expanded ? "mt-2 text-[10px] sm:text-[11px]" : "mt-1.5 text-[9px] sm:text-[10px]"
