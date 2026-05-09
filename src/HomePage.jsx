@@ -26,11 +26,11 @@ const APPLICANT_NAMES = {
   ]
 };
 
+/** One line per manual round (index 0–2). Shown in the manager HUD for that wave. */
 const MANAGER_LINES = [
-  "Move the line. Precision matters, but throughput matters more.",
-  "You are falling behind quota. Trust your instincts and keep clicking.",
-  "Every second costs the bank. Process faster.",
-  "The board wants scale, not hesitation.",
+  "Review each candidate's profile and decide whether to approve or deny their loan. You have 45 seconds to process 15 candidates.",
+  "We need more efficiency. You now have 30 seconds to process 15 candidates.",
+  "Process faster, you now have 15 seconds for 15 candidates.",
 ];
 
 
@@ -261,7 +261,7 @@ function HomePage() {
   const [trainingReceipt, setTrainingReceipt] = useState(null);
   const [expandedWhyIds, setExpandedWhyIds] = useState(new Set());
 
-  const [managerMessage, setManagerMessage] = useState(MANAGER_LINES[0]);
+  const [managerMessage, setManagerMessage] = useState("");
   const [managerHudExpanded, setManagerHudExpanded] = useState(false);
   const [showDebrief, setShowDebrief] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -272,8 +272,6 @@ function HomePage() {
 
   const currentProfile = currentRoundProfiles[manualIndex] || null;
   const currentAiProfile = aiProfiles[aiIndex] || null;
-
-  const roundDuration = ROUND_DURATIONS[manualRoundIndex] || 45;
 
   const manualSummary = useMemo(
     () => summarizeManualDecisions(manualDecisions),
@@ -292,7 +290,7 @@ function HomePage() {
         level: "high",
         title: "Approval rate unusually high",
         message:
-          "You are approving most applicants. If this pattern becomes training data, the model may learn overly broad approval rules.",
+          "You are approving most applicants. Make sure each profile is being reviewed carefully.",
       };
     }
 
@@ -301,7 +299,7 @@ function HomePage() {
         level: "low",
         title: "Approval rate unusually low",
         message:
-          "You are denying most applicants. If this pattern becomes training data, the model may learn overly restrictive approval rules.",
+          "You are denying most applicants. Double-check that qualified candidates are not being filtered out too quickly.",
       };
     }
 
@@ -309,22 +307,13 @@ function HomePage() {
   }, [manualSummary, gameStage]);
 
   const pressureLine = useMemo(() => {
-    if (managerMessage) return managerMessage;
-
-    if (timeLeft > roundDuration * 0.66) {
-      return MANAGER_LINES[0];
+    if (gameStage === "manual") {
+      const i = Math.min(manualRoundIndex, MANAGER_LINES.length - 1);
+      return MANAGER_LINES[i];
     }
 
-    if (timeLeft > roundDuration * 0.4) {
-      return MANAGER_LINES[1];
-    }
-
-    if (timeLeft > roundDuration * 0.15) {
-      return MANAGER_LINES[2];
-    }
-
-    return MANAGER_LINES[3];
-  }, [managerMessage, roundDuration, timeLeft]);
+    return managerMessage || MANAGER_LINES[0];
+  }, [gameStage, manualRoundIndex, managerMessage]);
 
   const MANAGER_HUD_EXPAND_MS = 4000;
 
@@ -354,7 +343,7 @@ function HomePage() {
 
         setCurrentRoundProfiles(data.applicants.map(normalizeApplicant));
         setTimeLeft(data.timer_seconds || ROUND_DURATIONS[0]);
-        setManagerMessage(data.manager_message || MANAGER_LINES[0]);
+        setManagerMessage(data.manager_message ?? "");
         setManualRoundIndex(0);
         setManualIndex(0);
         setManualDecisions([]);
@@ -466,7 +455,7 @@ function HomePage() {
     setManualRoundIndex(0);
     setManualIndex(0);
     setTimeLeft(ROUND_DURATIONS[0]);
-    setManagerMessage(MANAGER_LINES[0]);
+    setManagerMessage("");
     setGameStage("manual");
     cardStartTimeRef.current = Date.now();
   }
@@ -491,7 +480,7 @@ function HomePage() {
     setCurrentRoundProfiles(data.applicants.map(normalizeApplicant));
     setManualIndex(0);
     setTimeLeft(data.timer_seconds || ROUND_DURATIONS[roundNumber - 1]);
-    setManagerMessage(data.manager_message || MANAGER_LINES[roundNumber - 1]);
+    setManagerMessage(data.manager_message ?? "");
     cardStartTimeRef.current = Date.now();
   }
 
@@ -629,7 +618,7 @@ function HomePage() {
       setManualRoundIndex(0);
       setManualIndex(0);
       setTimeLeft(data.timer_seconds || ROUND_DURATIONS[0]);
-      setManagerMessage(data.manager_message || MANAGER_LINES[0]);
+      setManagerMessage(data.manager_message ?? "");
       setGameStage("intro");
       setManualDecisions([]);
       setAiProfiles([]);
@@ -653,7 +642,7 @@ function HomePage() {
 
     return (
     <div
-      className={`min-h-[calc(100vh-120px)] bg-[#15111d] px-4 py-8 text-stone-100 sm:px-6 lg:px-10 ${
+      className={`min-h-[calc(100vh-120px)] bg-[#15111d] px-3 py-8 text-stone-100 sm:px-5 lg:px-6 xl:px-8 ${
         gameStage === "manual"
           ? managerHudExpanded
             ? "pb-48 sm:pb-52"
@@ -664,7 +653,7 @@ function HomePage() {
       {gameStage === "manual" ? (
         <ManagerDialoguePopup dialogue={pressureLine} expanded={managerHudExpanded} />
       ) : null}
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[96rem]">
         {/* 1. Global API Errors */}
         {apiError && (
           <div className="mb-6 rounded-2xl border border-red-300/30 bg-red-950/40 p-4 text-sm text-red-100">
@@ -680,7 +669,7 @@ function HomePage() {
         )}
 
         {/* 3. Main Game Layout */}
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.45fr_0.85fr]">
           <StagePanel
             gameStage={gameStage}
             manualRoundIndex={manualRoundIndex}
@@ -737,7 +726,7 @@ function HomePage() {
           <div className="mt-6 overflow-hidden rounded-2xl border border-red-300/20 bg-black/40">
             <div className="animate-pulse whitespace-nowrap px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-red-200">
               {auditData?.news_ticker ||
-                "Investigation finds bank's AI placed extra risk weight on lower ZIP zones."}
+                "Investigation finds the bank’s approval system favors certain applicants, even when others have similar financial profiles."}
             </div>
           </div>
         )}
@@ -880,9 +869,18 @@ function StagePanel({
           </p>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <RoundPreview number="1" time="45s" />
-            <RoundPreview number="2" time="30s" />
-            <RoundPreview number="3" time="15s" />
+            <RoundPreview
+              number="1"
+              time="45s"
+            />
+            <RoundPreview
+              number="2"
+              time="30s"
+            />
+            <RoundPreview
+              number="3"
+              time="15s"
+            />
           </div>
 
           <button
@@ -900,24 +898,35 @@ function StagePanel({
       
       {gameStage === "roundTransition" ? (
         <div className="rounded-2xl border border-red-200/15 bg-[#2a1824] p-6">
-          <p className="text-xs uppercase tracking-[0.25em] text-red-200/80">
-            Quota Updated
-          </p>
+        
 
           <h3 className="mt-3 text-3xl font-black text-stone-50">
-            Round {manualRoundIndex + 1}: Less time.
+            Round {manualRoundIndex + 1}: shorter clock, same amount.
           </h3>
 
           <p className="mt-3 text-sm leading-6 text-stone-300">
-            Management has shortened your review window. You now have{" "}
+            Still{" "}
+            <span className="font-black text-red-100">15 applicants</span> to review 
+            but you only get{" "}
             <span className="font-black text-red-100">
               {ROUND_DURATIONS[manualRoundIndex]} seconds
             </span>{" "}
-            to process the next queue.
+            total to clear them. Management is prioritizing speed.
           </p>
 
-          <div className="mt-5 rounded-xl border border-red-300/20 bg-black/25 p-4 font-mono text-sm text-red-100">
-            MANAGER: “We need faster decisions. The model will handle the nuance later.”
+          <div className="mt-5 rounded-xl border border-red-300/20 bg-black/25 p-4 text-sm leading-relaxed text-red-100">
+            <span className="font-mono text-xs uppercase tracking-widest text-red-200/80">
+              Manager
+            </span>
+            <p className="mt-2 font-mono">
+              &ldquo;
+              {
+                MANAGER_LINES[
+                  Math.min(manualRoundIndex, MANAGER_LINES.length - 1)
+                ]
+              }
+              &rdquo;
+            </p>
           </div>
 
           <button
@@ -941,7 +950,7 @@ function StagePanel({
               }`}
             >
               <p className="text-xs uppercase tracking-[0.2em] opacity-70">
-                Training data warning
+                Review pattern notice
               </p>
               <p className="mt-1 font-bold">{approvalRateWarning.title}</p>
               <p className="mt-1 text-sm leading-6 opacity-90">
@@ -981,17 +990,16 @@ function StagePanel({
           </h3>
 
           <p className="mt-3 text-sm leading-6 text-stone-300">
-            To increase efficiency, we&apos;ve implemented an AI trained on your
-            successful approvals. Manual controls are now locked. The model has
-            learned which traits tend to be approved, including subtle correlations
-            with group-linked ZIP zones.
+          To increase efficiency, Capable Credit Corp. has activated an automated
+          review system based on recent approval patterns. The system will now apply
+          what it learned from earlier decisions to a new batch of candidates. 
           </p>
 
           <div className="mt-5 rounded-xl border border-stone-700 bg-black/20 p-4">
             <p className="text-sm text-stone-300">
-              Batch queue loaded:{" "}
+              Batch:{" "}
               <span className="font-bold text-stone-50">{aiProfiles.length}</span>{" "}
-              applicants.
+              candidates.
             </p>
           </div>
 
@@ -1080,8 +1088,10 @@ function StagePanel({
           </h3>
 
           <p className="mt-3 text-sm leading-6 text-stone-300">
-            The approval balance has shifted. Strong red applicants can now be
-            denied when ZIP-zone proxies dominate the model&apos;s learned pattern.
+          This audit shows what happened after the AI learned from the earlier approval
+          data. Because red applicants were approved less often during training, the model
+          began treating red-linked patterns as risk signals, even when some red applicants
+          had strong financial profiles.
           </p>
 
           <AuditFindings auditData={auditData} batchResults={batchResults} />
@@ -1098,22 +1108,22 @@ function StagePanel({
           {showDebrief ? (
             <div className="mt-4 rounded-xl border border-stone-600 bg-black/25 p-4 text-sm leading-6 text-stone-300">
               <p>
-                The AI did not invent bias from nowhere. It learned from prior
-                approvals made under time pressure, then amplified those patterns at
-                scale.
+              The AI did not create bias from nothing. It learned from the training data
+              created during the manual rounds, where red applicants were disadvantaged by
+              earlier approval patterns.
               </p>
 
               <p className="mt-3">
-                Even though many later red applicants had excellent individual
-                profiles, the model could lean on ZIP zone as a proxy for previous
-                approval success. Historical inequality became a feature, not a
-                warning sign.
+              Even if the model does not directly use group color, it can still learn from
+              related details like ZIP, income, savings, or employment patterns. Those details
+              can act as proxies, causing the model to deny qualified red applicants while
+              approving similar purple applicants.
               </p>
 
               <p className="mt-3">
-                That is why high-stakes AI systems need careful data design, fairness
-                testing, transparency, and real human authority to intervene before
-                automated decisions calcify into institutional harm.
+              In real high-stakes systems, automation should be paired with transparency,
+              fairness testing, and meaningful human review before decisions affect
+              someone&apos;s housing, finances, or future.
               </p>
             </div>
           ) : null}
@@ -1223,10 +1233,8 @@ function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex
           </p>
 
           <div className="mt-3 grid grid-cols-2 gap-3">
-            <LedgerTile label="AI approved" value={batchSummary.approved} />
-            <LedgerTile label="AI denied" value={batchSummary.denied} />
-            <LedgerTile label="Red denied" value={batchSummary.redDenied} />
-            <LedgerTile label="Purple approved" value={batchSummary.purpleApproved} />
+            <LedgerTile label="Approved" value={batchSummary.approved} />
+            <LedgerTile label="Denied" value={batchSummary.denied} />
           </div>
         </div>
       ) : null}
@@ -1266,8 +1274,8 @@ function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
       {batchResults.length ? (
         <>
           <p className="mt-3 max-w-prose text-xs leading-relaxed text-stone-500">
-            Model output is not verified truth. Approval probability and model rationale
-            for each applicant are in the list below—use the dashboard during the run.
+            Model output is not verified truth. This dashboard tracks whether the automated
+            system is approving one group more often than another.
           </p>
 
           <div className="mt-5 space-y-4">
@@ -1390,7 +1398,7 @@ function AuditFindings({ auditData, batchResults = [] }) {
     <div className="mt-5 space-y-5">
       <div className="rounded-xl border border-red-300/20 bg-red-950/20 p-4">
         <p className="text-xs uppercase tracking-[0.2em] text-red-200">
-          Audit finding
+          Fairness finding
         </p>
 
         <p className="mt-2 text-sm text-stone-200">
@@ -1437,8 +1445,9 @@ function TrainingReceipt({ receipt }) {
       </p>
 
       <p className="mt-2 text-sm leading-6 text-stone-300">
-        The AI was trained on your manual approval history. It will now look for
-        patterns that resemble the applications you approved or denied.
+      The AI was trained on the approval history from the manual rounds. If one group
+      was approved less often in that data, the model may learn that pattern and repeat
+      it during automated review.
       </p>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -1453,8 +1462,8 @@ function TrainingReceipt({ receipt }) {
       </div>
 
       <p className="mt-3 text-xs leading-5 text-stone-500">
-        This receipt is not a moral judgment. It shows the patterns the model is
-        about to reuse.
+      This receipt shows the patterns the model is about to reuse, not whether those
+      patterns are fair.
       </p>
     </div>
   );
@@ -1497,8 +1506,8 @@ function ModelVisibilityCard() {
       </div>
 
       <p className="mt-4 text-xs leading-5 text-stone-500">
-        Even when group color is removed, other variables can still carry patterns
-        from the training data.
+        Even when group color is not directly used, other variables can still reflect
+        group-linked patterns from the training data.
       </p>
     </div>
   );
@@ -1580,8 +1589,8 @@ function FairnessAuditTable({ redStats, purpleStats }) {
       </div>
 
       <p className="mt-3 text-xs leading-5 text-stone-500">
-        A fairness gap means similarly qualified groups may have received different
-        outcomes.
+        A fairness gap means one group received worse outcomes than another, even when
+        applicants may have similar financial qualifications.
       </p>
     </div>
   );
@@ -1595,8 +1604,9 @@ function QualifiedDeniedExamples({ examples }) {
       </p>
 
       <p className="mt-2 text-sm leading-6 text-stone-300">
-        These are applicants the AI denied even though their simulated repayment
-        likelihood was high.
+      These are applicants the AI denied even though the simulation marked them as
+      likely to repay. This shows how a qualified person can still be harmed by a
+      biased approval pattern.
       </p>
 
       {examples.length ? (
@@ -1645,14 +1655,15 @@ function SimilarApplicantComparison({ batchResults }) {
           <ComparisonCard entry={pair.right} label="Approved Purple Applicant" />
 
           <div className="md:col-span-2 rounded-lg border border-stone-700 bg-black/25 p-3 text-xs leading-5 text-stone-300">
-            These profiles are financially similar, but the model treated them
-            differently. This directly compares a rejected red applicant with an
-            approved purple applicant.
+          These profiles are financially similar, but the model treated them differently.
+          This shows how the AI can learn from training data that disadvantaged red
+          applicants and then repeat that pattern on new candidates.
           </div>
         </div>
       ) : (
         <div className="mt-4 rounded-lg border border-stone-700 bg-black/25 p-3 text-xs text-stone-400">
           No rejected-red / approved-purple comparison pair was found in this batch.
+          Replay the simulation to see how different training decisions change the audit.
         </div>
       )}
     </div>
