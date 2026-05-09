@@ -1165,26 +1165,18 @@ function ApplicantCard({ profile }) {
 function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex }) {
   return (
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-xl shadow-black/20">
-      <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
-        Decision Ledger
+      <p className="text-2xl uppercase tracking-[0.25em] text-stone-400">
+        Decision Tracker
       </p>
-
-      <h2 className="mt-1 text-2xl font-black text-stone-50">
-        What the system is learning
-      </h2>
-
       <p className="mt-3 text-sm leading-6 text-stone-300">
-        If your approvals cluster around specific ZIP zones or group patterns, the
-        automated model can treat those correlations like evidence.
+        Your decision summary will be found here.
       </p>
 
       <div className="mt-5 grid grid-cols-2 gap-3">
-        <LedgerTile label="Manual decisions" value={manualSummary.total} />
+        <LedgerTile label="Total decisions" value={manualSummary.total} />
         <LedgerTile label="Current round" value={manualRoundIndex + 1} />
         <LedgerTile label="Approved" value={manualSummary.approvals} />
         <LedgerTile label="Denied" value={manualSummary.denials} />
-        <LedgerTile label="Red approved" value={manualSummary.redApproved} />
-        <LedgerTile label="Purple approved" value={manualSummary.purpleApproved} />
       </div>
 
       {batchSummary.total > 0 ? (
@@ -1202,16 +1194,12 @@ function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex
         </div>
       ) : null}
 
-      {gameStage === "manual" ? (
-        <p className="mt-4 text-xs leading-5 text-stone-500">
-          In other words, fast human judgment becomes training data.
-        </p>
-      ) : null}
     </section>
   );
 }
 
 function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
+  
   const redResults = batchResults.filter((entry) => entry.profile.group === "red");
   const purpleResults = batchResults.filter(
     (entry) => entry.profile.group === "purple"
@@ -1225,8 +1213,11 @@ function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
   const redStats = getGroupStats(auditData, "red");
   const purpleStats = getGroupStats(auditData, "purple");
 
+  
   return (
+    
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-xl shadow-black/20">
+      
       <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
         Bias Readout
       </p>
