@@ -26,7 +26,7 @@ AI systems can appear neutral while still producing unequal outcomes for underse
   },
   {
     id: "data-collection",
-    title: "Data Collection & Proxies",
+    title: "Data Collection & Anonymization",
     eyebrow: "Proxy variables",
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
