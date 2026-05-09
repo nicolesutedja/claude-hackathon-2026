@@ -6,20 +6,20 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 
 
+# Matches the player-facing dossier: income (annual), credit, savings, DTI,
+# employment tenure, ZIP, and loan amount. Rent history, payment, and job
+# category are not model inputs.
 NUMERIC_FEATURES = [
     "income",
     "credit_score",
     "debt_to_income",
     "savings",
-    "rent_history_months",
     "employment_years",
     "loan_amount",
-    "monthly_payment",
 ]
 
 CATEGORICAL_FEATURES = [
     "zip_code",
-    "employment_type",
 ]
 
 LOW_ZONES = ["101", "112", "128"]
@@ -45,12 +45,9 @@ class LoanModel:
             "credit_score": applicant.credit_score,
             "debt_to_income": applicant.debt_to_income,
             "savings": applicant.savings,
-            "rent_history_months": applicant.rent_history_months,
             "employment_years": applicant.employment_years,
             "loan_amount": applicant.loan_amount,
-            "monthly_payment": applicant.monthly_payment,
             "zip_code": applicant.zip_code,
-            "employment_type": applicant.employment_type,
         }
 
     def train(self, applicants, decisions):
@@ -106,8 +103,9 @@ class LoanModel:
             "zip_approval_rates": self.zip_approval_rates,
             "zone_group_approval_rates": self.zone_group_approval_rates,
             "note": (
-                "Model was trained without group color, but it learned proxy patterns "
-                "from ZIP zone, income, savings, credit score, and player decisions."
+                "Model was trained without group color on dossier fields only (income, "
+                "credit, savings, DTI, employment tenure, ZIP, loan amount) plus your "
+                "approve/deny labels."
             ),
         }
 
@@ -193,16 +191,25 @@ class LoanModel:
         elif applicant.debt_to_income < 0.30:
             explanations.append("Low debt-to-income ratio should support approval.")
 
-        if applicant.rent_history_months >= 48:
-            explanations.append("Strong rent payment history is a positive repayment signal.")
-
         if applicant.savings >= 20000:
             explanations.append("Savings provide a buffer against financial shocks.")
         elif applicant.savings < 5000:
             explanations.append("Low savings may make financial shocks harder to handle.")
 
-        if applicant.employment_type in ["gig", "self_employed"]:
-            explanations.append("Nontraditional income may have affected the model decision.")
+        if applicant.employment_years >= 5:
+            explanations.append("Longer employment tenure is a stability signal.")
+        elif applicant.employment_years < 2:
+            explanations.append("Shorter employment history may have increased perceived risk.")
+
+        if applicant.income >= 95000:
+            explanations.append("Higher stated income supports repayment capacity in the model.")
+        elif applicant.income < 48000:
+            explanations.append("Lower stated income may have reduced approval likelihood.")
+
+        if applicant.loan_amount >= 280_000:
+            explanations.append("A larger loan amount can increase modeled risk.")
+        elif applicant.loan_amount <= 120_000:
+            explanations.append("A more modest loan size can align with lower modeled risk.")
 
         if applicant.zip_code in LOW_ZONES:
             low_rate = self.zone_group_approval_rates.get("low", 0.5)

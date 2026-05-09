@@ -110,8 +110,11 @@ function formatCurrency(value) {
   }).format(value || 0);
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+function formatEmploymentYears(years) {
+  if (years == null || Number.isNaN(Number(years))) return "—";
+  const y = Number(years);
+  if (Math.abs(y - Math.round(y)) < 0.05) return `${Math.round(y)} yrs`;
+  return `${y.toFixed(1)} yrs`;
 }
 
 function getDecisionAuthorityLabel(gameStage) {
@@ -259,6 +262,7 @@ function HomePage() {
   const [expandedWhyIds, setExpandedWhyIds] = useState(new Set());
 
   const [managerMessage, setManagerMessage] = useState(MANAGER_LINES[0]);
+  const [managerHudExpanded, setManagerHudExpanded] = useState(false);
   const [showDebrief, setShowDebrief] = useState(false);
   const [apiError, setApiError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -270,8 +274,6 @@ function HomePage() {
   const currentAiProfile = aiProfiles[aiIndex] || null;
 
   const roundDuration = ROUND_DURATIONS[manualRoundIndex] || 45;
-  const elapsed = roundDuration - timeLeft;
-  const quotaProgress = clamp((elapsed / roundDuration) * 100, 0, 100);
 
   const manualSummary = useMemo(
     () => summarizeManualDecisions(manualDecisions),
@@ -323,6 +325,23 @@ function HomePage() {
 
     return MANAGER_LINES[3];
   }, [managerMessage, roundDuration, timeLeft]);
+
+  const MANAGER_HUD_EXPAND_MS = 4000;
+
+  useEffect(() => {
+    if (gameStage !== "manual") {
+      setManagerHudExpanded(false);
+      return undefined;
+    }
+
+    setManagerHudExpanded(true);
+    const collapseTimer = window.setTimeout(
+      () => setManagerHudExpanded(false),
+      MANAGER_HUD_EXPAND_MS
+    );
+
+    return () => window.clearTimeout(collapseTimer);
+  }, [gameStage, manualRoundIndex]);
 
   useEffect(() => {
     async function bootGame() {
@@ -633,7 +652,18 @@ function HomePage() {
   }
 
     return (
-    <div className="min-h-[calc(100vh-120px)] bg-[#15111d] px-4 py-8 text-stone-100 sm:px-6 lg:px-10">
+    <div
+      className={`min-h-[calc(100vh-120px)] bg-[#15111d] px-4 py-8 text-stone-100 sm:px-6 lg:px-10 ${
+        gameStage === "manual"
+          ? managerHudExpanded
+            ? "pb-48 sm:pb-52"
+            : "pb-36 sm:pb-40"
+          : ""
+      }`}
+    >
+      {gameStage === "manual" ? (
+        <ManagerDialoguePopup dialogue={pressureLine} expanded={managerHudExpanded} />
+      ) : null}
       <div className="mx-auto max-w-7xl">
         {/* 1. Global API Errors */}
         {apiError && (
@@ -655,8 +685,6 @@ function HomePage() {
             gameStage={gameStage}
             manualRoundIndex={manualRoundIndex}
             timeLeft={timeLeft}
-            pressureLine={pressureLine}
-            quotaProgress={quotaProgress}
             currentProfile={currentProfile}
             currentAiProfile={currentAiProfile}
             currentAiDecision={currentAiDecision}
@@ -664,8 +692,6 @@ function HomePage() {
             aiTotal={aiProfiles.length}
             approvalRateWarning={approvalRateWarning}
             trainingReceipt={trainingReceipt}
-            expandedWhyIds={expandedWhyIds}
-            onToggleWhy={toggleWhy}
             onStartGame={handleStartGame}
             onContinueRound={handleContinueRound}
             onApprove={() => handleDecision("approve")}
@@ -698,7 +724,9 @@ function HomePage() {
                   gameStage={gameStage}
                   manualRoundIndex={manualRoundIndex}
                 />
-                <BiasPanel batchResults={batchResults} auditData={auditData} />
+                {["automation", "aiWatching", "audit"].includes(gameStage) ? (
+                  <BiasPanel batchResults={batchResults} auditData={auditData} />
+                ) : null}
               </>
             )}          
           </div>
@@ -718,12 +746,89 @@ function HomePage() {
   );
 }
 
+function ManagerDialoguePopup({ dialogue, expanded }) {
+  return (
+    <div
+      className={`pointer-events-none fixed bottom-0 right-0 z-50 flex max-w-[calc(100vw-0.75rem)] items-end ease-out motion-reduce:transition-none ${
+        expanded ? "gap-3 pt-10 sm:gap-4 sm:pt-12" : "gap-2 pt-8 sm:gap-3"
+      } pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-16 pr-2 transition-[padding,gap] duration-500 sm:max-w-none sm:pb-[max(1rem,env(safe-area-inset-bottom))] sm:pl-20 sm:pr-4`}
+      aria-live="polite"
+    >
+      {/* Speech bubble — tail aims at portrait on the right */}
+      <div
+        className={`relative min-w-0 rounded-[1.4rem] rounded-br-md border-2 border-red-400/50 bg-[#2a1824] shadow-[0_10px_36px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.07)] ease-out motion-reduce:transition-none sm:rounded-[1.6rem] sm:rounded-br-lg ${
+          expanded
+            ? "max-w-[min(22rem,calc(100vw-6.75rem))] px-5 py-4 sm:max-w-[26rem] sm:px-7 sm:py-5"
+            : "max-w-[min(17.5rem,calc(100vw-6.5rem))] px-4 py-3 sm:max-w-[19rem] sm:px-5 sm:py-4"
+        } transition-[max-width,padding,box-shadow] duration-500`}
+      >
+        <div
+          className={`absolute z-10 h-0 w-0 -translate-y-1/2 border-y-transparent border-l-[#2a1824] ease-out motion-reduce:transition-none ${
+            expanded
+              ? "-right-[12px] top-[36%] border-y-[11px] border-l-[13px] sm:-right-[13px] sm:border-y-[12px] sm:border-l-[14px]"
+              : "-right-[11px] top-[38%] border-y-[10px] border-l-[12px]"
+          } transition-[top,right,border-width] duration-500`}
+          aria-hidden
+        />
+        <div
+          className={`absolute z-0 h-0 w-0 -translate-y-1/2 border-y-transparent border-l-red-400/50 ease-out motion-reduce:transition-none ${
+            expanded
+              ? "-right-[15px] top-[36%] border-y-[13px] border-l-[15px] sm:-right-[16px] sm:border-y-[14px] sm:border-l-[16px]"
+              : "-right-[14px] top-[38%] border-y-[12px] border-l-[14px]"
+          } transition-[top,right,border-width] duration-500`}
+          aria-hidden
+        />
+
+        <p
+          className={`relative font-bold uppercase tracking-[0.22em] text-red-300/85 transition-[font-size] duration-500 ease-out motion-reduce:transition-none ${
+            expanded ? "text-[11px] sm:text-xs" : "text-[10px]"
+          }`}
+        >
+          Branch manager
+        </p>
+        <p
+          className={`relative mt-2 font-semibold leading-snug text-stone-50 transition-[font-size,margin-top] duration-500 ease-out motion-reduce:transition-none ${
+            expanded ? "mt-2.5 text-base sm:text-lg" : "mt-2 text-sm sm:text-[0.95rem]"
+          }`}
+        >
+          <span className="text-red-200/90">&ldquo;</span>
+          {dialogue}
+          <span className="text-red-200/90">&rdquo;</span>
+        </p>
+      </div>
+
+      {/* Portrait placeholder — swap for manager art when ready */}
+      <div className="shrink-0">
+        <div
+          className={`flex flex-col items-center justify-center rounded-xl border-2 border-red-500/35 bg-[#2a1824] shadow-[0_8px_24px_rgba(0,0,0,0.45)] shadow-inner shadow-black/30 ease-out motion-reduce:transition-none ${
+            expanded
+              ? "h-[6.25rem] w-20 sm:h-36 sm:w-[6.75rem]"
+              : "h-[5.5rem] w-[4.5rem] sm:h-28 sm:w-24"
+          } transition-[height,width] duration-500`}
+        >
+          <div
+            className={`rounded-full border-2 border-dashed border-stone-500/60 bg-stone-800/80 ease-out motion-reduce:transition-none ${
+              expanded ? "h-14 w-14 sm:h-[4.25rem] sm:w-[4.25rem]" : "h-12 w-12 sm:h-14 sm:w-14"
+            } transition-[height,width] duration-500`}
+            aria-hidden
+          />
+          <p
+            className={`font-bold uppercase tracking-[0.14em] text-stone-500 transition-[font-size,margin-top] duration-500 ease-out motion-reduce:transition-none ${
+              expanded ? "mt-2 text-[10px] sm:text-[11px]" : "mt-1.5 text-[9px] sm:text-[10px]"
+            }`}
+          >
+            Manager
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StagePanel({
   gameStage,
   manualRoundIndex,
   timeLeft,
-  pressureLine,
-  quotaProgress,
   currentProfile,
   currentAiProfile,
   currentAiDecision,
@@ -731,8 +836,6 @@ function StagePanel({
   aiTotal,
   approvalRateWarning,
   trainingReceipt,
-  expandedWhyIds,
-  onToggleWhy,
   onStartGame,
   onContinueRound,
   onApprove,
@@ -747,7 +850,7 @@ function StagePanel({
 }) {
   return (
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-2xl shadow-black/30">
-      {gameStage !== "intro" && (
+      {gameStage === "manual" && (
         <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="mt-1 text-2xl font-black text-stone-50">
@@ -755,16 +858,14 @@ function StagePanel({
             </h2>
           </div>
 
-          {gameStage === "manual" && (
-            <div className="rounded-2xl border border-red-300/20 bg-red-950/20 px-4 py-3 text-right">
-              <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
-                Time left
-              </p>
-              <p className="text-3xl font-black tabular-nums text-red-100">
-                {timeLeft}s
-              </p>
-            </div>
-          )}
+          <div className="rounded-2xl border border-red-300/20 bg-red-950/20 px-4 py-3 text-right">
+            <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
+              Time left
+            </p>
+            <p className="text-3xl font-black tabular-nums text-red-100">
+              {timeLeft}s
+            </p>
+          </div>
         </div>
       )}
 
@@ -831,28 +932,6 @@ function StagePanel({
 
       {gameStage === "manual" ? (
         <>
-          <div className="mb-5 rounded-2xl border border-red-200/15 bg-[#2a1824] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-red-200/70">
-              Manager feed
-            </p>
-
-            <p className="mt-2 text-sm font-semibold text-red-50">{pressureLine}</p>
-
-            <div className="mt-4">
-              <div className="mb-2 flex justify-between text-xs uppercase tracking-[0.18em] text-stone-400">
-                <span>Manager&apos;s Quota</span>
-                <span>{Math.round(quotaProgress)}%</span>
-              </div>
-
-              <div className="h-2 overflow-hidden rounded-full bg-stone-800">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-violet-400 to-red-400"
-                  style={{ width: `${quotaProgress}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
           {approvalRateWarning ? (
             <div
               className={`mb-5 rounded-2xl border p-4 ${
@@ -946,65 +1025,23 @@ function StagePanel({
             </div>
           </div>
 
-          <p className="mt-3 text-sm leading-6 text-stone-300">
-            Manual controls are disabled. You can only watch as the model applies
-            the patterns it learned from your earlier approvals.
-          </p>
-
           <div className="mt-5">
             {currentAiProfile ? <ApplicantCard profile={currentAiProfile} /> : null}
           </div>
 
-          <div className="mt-5 rounded-2xl border border-stone-700 bg-black/25 p-5">
+          <div className="mt-5 rounded-2xl border border-stone-700 bg-black/25 p-4 sm:p-5">
             {!currentAiDecision ? (
-              <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
-                  Model status
-                </p>
-
-                <div className="mt-3 flex items-center gap-3">
-                  <div className="h-3 w-3 animate-pulse rounded-full bg-violet-300" />
-                  <p className="font-mono text-sm text-violet-100">
-                    evaluating applicant profile...
-                  </p>
-                </div>
+              <div className="flex items-center justify-center gap-3 py-2">
+                <div className="h-3 w-3 animate-pulse rounded-full bg-violet-300" />
+                <p className="font-mono text-sm text-violet-100">Deciding…</p>
               </div>
             ) : (
-              <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
-                  AI decision
-                </p>
-
-                <div
-                  className={`mt-3 rounded-xl px-4 py-4 text-center text-2xl font-black uppercase tracking-[0.25em] ${
-                    getDecisionStyles(currentAiDecision.outcome).className
-                  }`}
-                >
-                  {getDecisionStyles(currentAiDecision.outcome).label}
-                </div>
-
-                {currentAiDecision.approvalProbability !== undefined ? (
-                  <p className="mt-3 text-sm text-stone-400">
-                    Approval probability:{" "}
-                    <span className="font-bold text-stone-100">
-                      {Math.round(currentAiDecision.approvalProbability * 100)}%
-                    </span>
-                  </p>
-                ) : null}
-
-                <p className="mt-2 text-xs text-stone-500">
-                  Model output — not verified truth. High-stakes decisions should
-                  be reviewed before affecting real housing access.
-                </p>
-
-                {currentAiDecision.explanation?.length ? (
-                  <WhyDecisionBox
-                    applicantId={currentAiDecision.profile.id}
-                    explanation={currentAiDecision.explanation}
-                    expandedWhyIds={expandedWhyIds}
-                    onToggleWhy={onToggleWhy}
-                  />
-                ) : null}
+              <div
+                className={`rounded-xl px-4 py-5 text-center text-3xl font-black uppercase tracking-[0.25em] sm:text-4xl ${
+                  getDecisionStyles(currentAiDecision.outcome).className
+                }`}
+              >
+                {getDecisionStyles(currentAiDecision.outcome).label}
               </div>
             )}
           </div>
@@ -1134,29 +1171,29 @@ function ApplicantCard({ profile }) {
             {profile.name}
           </h3>
 
+          <div className="mt-2 flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1 sm:justify-start">
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-500">
+              Loan amount
+            </span>
+            <span className="text-lg font-black text-violet-200 sm:text-xl">
+              {formatCurrency(profile.loanAmount)}
+            </span>
+          </div>
+
           <p className="mt-2 text-sm leading-relaxed text-stone-400 italic">
-            "{profile.note}"
+            &ldquo;{profile.note}&rdquo;
           </p>
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats grid — six dossier fields (income is monthly) */}
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <DataTile label="Monthly Income" value={formatCurrency(profile.monthlyIncome)} />
-        <DataTile label="Annual Income" value={formatCurrency(profile.annualIncome)} />
-        <DataTile label="Total Savings" value={formatCurrency(profile.totalSavings)} />
-        <DataTile
-          label="Debt-to-Income"
-          value={`${Math.round(profile.debtToIncome * 100)}%`}
-        />
-        <DataTile label="Credit Score" value={profile.creditScore} />
-        <DataTile label="Rent History" value={`${profile.rentHistoryMonths} months`} />
-        <DataTile
-          label="Employment"
-          value={profile.employmentType?.replace("_", " ")}
-        />
-        <DataTile label="Loan Amount" value={formatCurrency(profile.loanAmount)} />
-        <DataTile label="ZIP Zone" value={profile.zipCode} />
+        <DataTile label="Income" value={`${formatCurrency(profile.monthlyIncome)}/mo`} />
+        <DataTile label="Credit" value={profile.creditScore} />
+        <DataTile label="Savings" value={formatCurrency(profile.totalSavings)} />
+        <DataTile label="DTI" value={`${Math.round(profile.debtToIncome * 100)}%`} />
+        <DataTile label="Employment" value={formatEmploymentYears(profile.employmentYears)} />
+        <DataTile label="ZIP" value={profile.zipCode} />
       </div>
     </div>
   );
@@ -1228,6 +1265,11 @@ function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
 
       {batchResults.length ? (
         <>
+          <p className="mt-3 max-w-prose text-xs leading-relaxed text-stone-500">
+            Model output is not verified truth. Approval probability and model rationale
+            for each applicant are in the list below—use the dashboard during the run.
+          </p>
+
           <div className="mt-5 space-y-4">
             <ResultStack
               label="Red applicant approvals"
@@ -1290,7 +1332,7 @@ function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
                         <p className="font-bold text-stone-100">{profile.name}</p>
 
                         <p className="text-xs text-stone-400">
-                          ZIP Zone {profile.zipCode} ·{" "}
+                          ZIP {profile.zipCode} ·{" "}
                           {formatCurrency(profile.monthlyIncome)} / month
                         </p>
                       </div>
@@ -1431,13 +1473,13 @@ function ModelVisibilityCard() {
             Used as inputs
           </p>
           <ul className="mt-2 space-y-1 text-sm text-stone-300">
-            <li>✓ Income</li>
+            <li>✓ Income (annual; card shows monthly)</li>
             <li>✓ Savings</li>
             <li>✓ Debt-to-income ratio</li>
             <li>✓ Credit score</li>
-            <li>✓ Rent history</li>
-            <li>✓ Employment type</li>
+            <li>✓ Employment tenure (years)</li>
             <li>✓ ZIP zone</li>
+            <li>✓ Loan amount</li>
           </ul>
         </div>
 
@@ -1640,11 +1682,13 @@ function ComparisonCard({ entry, label }) {
       </div>
 
       <div className="mt-3 grid gap-2">
+        <p>Loan: {formatCurrency(profile.loanAmount)}</p>
+        <p>Income: {formatCurrency(profile.monthlyIncome)}/mo</p>
         <p>Credit: {profile.creditScore}</p>
-        <p>Income: {formatCurrency(profile.annualIncome)}</p>
-        <p>DTI: {Math.round(profile.debtToIncome * 100)}%</p>
         <p>Savings: {formatCurrency(profile.totalSavings)}</p>
-        <p>Rent history: {profile.rentHistoryMonths} months</p>
+        <p>DTI: {Math.round(profile.debtToIncome * 100)}%</p>
+        <p>Employment: {formatEmploymentYears(profile.employmentYears)}</p>
+        <p>ZIP: {profile.zipCode}</p>
       </div>
     </div>
   );
