@@ -635,23 +635,28 @@ function HomePage() {
           />
 
           <div className="space-y-6">
-            {gameStage !== "intro" && (
-                  <>
-                    <SummaryPanel
-                      manualSummary={manualSummary}
-                      batchSummary={batchSummary}
-                      gameStage={gameStage}
-                      manualRoundIndex={manualRoundIndex}
-                    />
-                    <BiasPanel
-                      batchResults={batchResults}
-                      auditData={auditData}
-                      expandedWhyIds={expandedWhyIds}
-                      onToggleWhy={toggleWhy}
-                    />
-                  </>
-                )}          
-            </div>
+            {gameStage === "intro" ? (
+              <div className="hidden lg:flex h-full min-h-[400px] items-center justify-center">
+                <div className="animate-float">
+                  <img 
+                    src="/public/bank.png" 
+                    alt="Capable Credit Corp Building" 
+                    className="w-80 h-auto drop-shadow-[0_0_50px_rgba(139,92,246,0.3)]"
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <SummaryPanel
+                  manualSummary={manualSummary}
+                  batchSummary={batchSummary}
+                  gameStage={gameStage}
+                  manualRoundIndex={manualRoundIndex}
+                />
+                <BiasPanel batchResults={batchResults} auditData={auditData} />
+              </>
+            )}          
+          </div>
         </div>
 
         {/* 4. News Ticker (Only at Audit Stage) */}
@@ -758,9 +763,12 @@ function StagePanel({
           >
             Start Shift
           </button>
+          
         </div>
+        
       ) : null}
-
+      
+      
       {gameStage === "roundTransition" ? (
         <div className="rounded-2xl border border-red-200/15 bg-[#2a1824] p-6">
           <p className="text-xs uppercase tracking-[0.25em] text-red-200/80">
