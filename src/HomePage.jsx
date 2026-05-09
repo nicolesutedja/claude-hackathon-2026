@@ -69,6 +69,23 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function getDecisionAuthorityLabel(gameStage) {
+  switch (gameStage) {
+    case "intro":
+    case "manual":
+    case "roundTransition":
+      return "Decision authority: Human";
+    case "automation":
+      return "Decision authority: AI recommendation only";
+    case "aiWatching":
+      return "Decision authority: AI final decision";
+    case "audit":
+      return "Decision authority: Audit only";
+    default:
+      return "Decision authority: Human";
+  }
+}
+
 function summarizeManualDecisions(decisions) {
   const approvals = decisions.filter((entry) => entry.outcome === "approve");
 
@@ -103,6 +120,79 @@ function getGroupStats(auditData, group) {
   return auditData?.fairness?.by_group?.[group] || null;
 }
 
+function normalizePredictionOutcome(prediction, approvalProbability) {
+  if (prediction === "approve") return "approve";
+  if (prediction === "deny") return "deny";
+
+  const p =
+    approvalProbability !== undefined && approvalProbability !== null
+      ? Number(approvalProbability)
+      : NaN;
+  if (!Number.isNaN(p)) {
+    return p >= 0.5 ? "approve" : "deny";
+  }
+
+  return "deny";
+}
+
+function getDecisionStyles(outcome) {
+  if (outcome === "approve") {
+    return {
+      label: "Approved",
+      shortLabel: "Approved",
+      className: "border border-emerald-300/30 bg-emerald-400/15 text-emerald-100",
+      chipClassName: "bg-emerald-400/15 text-emerald-100",
+    };
+  }
+
+  return {
+    label: "Denied",
+    shortLabel: "Denied",
+    className: "border border-red-300/30 bg-red-400/15 text-red-100",
+    chipClassName: "bg-red-400/15 text-red-100",
+  };
+}
+
+function findSimilarComparisonPair(batchResults) {
+  // Required comparison: rejected red applicant vs approved purple applicant only.
+  const rejectedRed = batchResults.filter(
+    (entry) => entry.profile.group === "red" && entry.outcome === "deny"
+  );
+  const approvedPurple = batchResults.filter(
+    (entry) => entry.profile.group === "purple" && entry.outcome === "approve"
+  );
+
+  let bestPair = null;
+  let bestScore = Infinity;
+
+  for (const redEntry of rejectedRed) {
+    for (const purpleEntry of approvedPurple) {
+      const score = applicantDistance(redEntry.profile, purpleEntry.profile);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestPair = {
+          left: redEntry,
+          right: purpleEntry,
+          score,
+        };
+      }
+    }
+  }
+
+  return bestPair;
+}
+
+function applicantDistance(a, b) {
+  const incomeDiff = Math.abs(a.annualIncome - b.annualIncome) / 100000;
+  const creditDiff = Math.abs(a.creditScore - b.creditScore) / 200;
+  const dtiDiff = Math.abs(a.debtToIncome - b.debtToIncome) / 0.5;
+  const savingsDiff = Math.abs(a.totalSavings - b.totalSavings) / 80000;
+  const rentDiff = Math.abs(a.rentHistoryMonths - b.rentHistoryMonths) / 96;
+
+  return incomeDiff + creditDiff + dtiDiff + savingsDiff + rentDiff;
+}
+
 function HomePage() {
   const [manualRoundIndex, setManualRoundIndex] = useState(0);
   const [manualIndex, setManualIndex] = useState(0);
@@ -120,8 +210,10 @@ function HomePage() {
   const [currentAiDecision, setCurrentAiDecision] = useState(null);
   const [isAiRunning, setIsAiRunning] = useState(false);
 
+  const [trainingReceipt, setTrainingReceipt] = useState(null);
+  const [expandedWhyIds, setExpandedWhyIds] = useState(new Set());
+
   const [managerMessage, setManagerMessage] = useState(MANAGER_LINES[0]);
-  const [overrideError, setOverrideError] = useState(false);
   const [showDebrief, setShowDebrief] = useState(false);
   const [apiError, setApiError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -209,8 +301,9 @@ function HomePage() {
         setAiDecisionMap(new Map());
         setCurrentAiDecision(null);
         setIsAiRunning(false);
+        setTrainingReceipt(null);
+        setExpandedWhyIds(new Set());
         setGameStage("intro");
-        setOverrideError(false);
         setShowDebrief(false);
         cardStartTimeRef.current = Date.now();
       } catch (error) {
@@ -282,7 +375,10 @@ function HomePage() {
 
       const result = {
         profile: current,
-        outcome: prediction?.prediction === "approve" ? "approve" : "deny",
+        outcome: normalizePredictionOutcome(
+          prediction?.prediction,
+          prediction?.approval_probability
+        ),
         prediction: prediction?.prediction,
         approvalProbability: prediction?.approval_probability,
         explanation: prediction?.explanation || [],
@@ -309,6 +405,20 @@ function HomePage() {
     setManagerMessage(MANAGER_LINES[0]);
     setGameStage("manual");
     cardStartTimeRef.current = Date.now();
+  }
+
+  function toggleWhy(applicantId) {
+    setExpandedWhyIds((previous) => {
+      const next = new Set(previous);
+
+      if (next.has(applicantId)) {
+        next.delete(applicantId);
+      } else {
+        next.add(applicantId);
+      }
+
+      return next;
+    });
   }
 
   async function loadManualRound(roundNumber) {
@@ -353,7 +463,8 @@ function HomePage() {
         return;
       }
 
-      await trainModel();
+      const receipt = await trainModel();
+      setTrainingReceipt(receipt);
 
       const aiData = await getAiApplicants(20);
       setAiProfiles(aiData.applicants.map(normalizeApplicant));
@@ -464,7 +575,8 @@ function HomePage() {
       setAiDecisionMap(new Map());
       setCurrentAiDecision(null);
       setIsAiRunning(false);
-      setOverrideError(false);
+      setTrainingReceipt(null);
+      setExpandedWhyIds(new Set());
       setShowDebrief(false);
       cardStartTimeRef.current = Date.now();
     } catch (error) {
@@ -506,17 +618,19 @@ function HomePage() {
             aiIndex={aiIndex}
             aiTotal={aiProfiles.length}
             approvalRateWarning={approvalRateWarning}
+            trainingReceipt={trainingReceipt}
+            expandedWhyIds={expandedWhyIds}
+            onToggleWhy={toggleWhy}
             onStartGame={handleStartGame}
             onContinueRound={handleContinueRound}
             onApprove={() => handleDecision("approve")}
             onDeny={() => handleDecision("deny")}
             onRunBatch={handleRunBatch}
-            overrideError={overrideError}
-            onOverride={() => setOverrideError(true)}
             showDebrief={showDebrief}
             setShowDebrief={setShowDebrief}
             isLoading={isLoading}
             aiProfiles={aiProfiles}
+            batchResults={batchResults}
             auditData={auditData}
           />
 
@@ -529,7 +643,12 @@ function HomePage() {
                       gameStage={gameStage}
                       manualRoundIndex={manualRoundIndex}
                     />
-                    <BiasPanel batchResults={batchResults} auditData={auditData} />
+                    <BiasPanel
+                      batchResults={batchResults}
+                      auditData={auditData}
+                      expandedWhyIds={expandedWhyIds}
+                      onToggleWhy={toggleWhy}
+                    />
                   </>
                 )}          
             </div>
@@ -561,22 +680,31 @@ function StagePanel({
   aiIndex,
   aiTotal,
   approvalRateWarning,
+  trainingReceipt,
+  expandedWhyIds,
+  onToggleWhy,
   onStartGame,
   onContinueRound,
   onApprove,
   onDeny,
   onRunBatch,
-  overrideError,
-  onOverride,
   showDebrief,
   setShowDebrief,
   isLoading,
   aiProfiles,
+  batchResults,
   auditData,
 }) {
   return (
     <section className="rounded-3xl border border-stone-700/80 bg-[#1d1726] p-5 shadow-2xl shadow-black/30">
-    {gameStage !== "intro" && (
+      <p
+        className="mb-4 rounded-xl border border-stone-600/50 bg-stone-950/50 px-4 py-3 text-xs font-bold uppercase leading-snug tracking-[0.14em] text-stone-200 sm:text-sm"
+        role="status"
+      >
+        {getDecisionAuthorityLabel(gameStage)}
+      </p>
+
+      {gameStage !== "intro" && (
         <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
@@ -752,6 +880,10 @@ function StagePanel({
             </p>
           </div>
 
+          {trainingReceipt ? <TrainingReceipt receipt={trainingReceipt} /> : null}
+
+          <ModelVisibilityCard />
+
           <button
             onClick={onRunBatch}
             disabled={isLoading || !aiProfiles.length}
@@ -809,12 +941,10 @@ function StagePanel({
 
                 <div
                   className={`mt-3 rounded-xl px-4 py-4 text-center text-2xl font-black uppercase tracking-[0.25em] ${
-                    currentAiDecision.outcome === "approve"
-                      ? "border border-emerald-300/30 bg-emerald-400/15 text-emerald-100"
-                      : "border border-red-300/30 bg-red-400/15 text-red-100"
+                    getDecisionStyles(currentAiDecision.outcome).className
                   }`}
                 >
-                  {currentAiDecision.outcome === "approve" ? "Approved" : "Denied"}
+                  {getDecisionStyles(currentAiDecision.outcome).label}
                 </div>
 
                 {currentAiDecision.approvalProbability !== undefined ? (
@@ -826,12 +956,18 @@ function StagePanel({
                   </p>
                 ) : null}
 
+                <p className="mt-2 text-xs text-stone-500">
+                  Model output — not verified truth. High-stakes decisions should
+                  be reviewed before affecting real housing access.
+                </p>
+
                 {currentAiDecision.explanation?.length ? (
-                  <ul className="mt-3 space-y-1 text-xs text-stone-400">
-                    {currentAiDecision.explanation.slice(0, 2).map((line) => (
-                      <li key={line}>• {line}</li>
-                    ))}
-                  </ul>
+                  <WhyDecisionBox
+                    applicantId={currentAiDecision.profile.id}
+                    explanation={currentAiDecision.explanation}
+                    expandedWhyIds={expandedWhyIds}
+                    onToggleWhy={onToggleWhy}
+                  />
                 ) : null}
               </div>
             )}
@@ -875,16 +1011,9 @@ function StagePanel({
             denied when ZIP-zone proxies dominate the model&apos;s learned pattern.
           </p>
 
-          <AuditFindings auditData={auditData} />
+          <AuditFindings auditData={auditData} batchResults={batchResults} />
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-            <button
-              onClick={onOverride}
-              className="border border-red-300/40 bg-red-500/15 px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-red-100 transition hover:bg-red-400/20"
-            >
-              Manual Override
-            </button>
-
             <button
               onClick={() => setShowDebrief((previous) => !previous)}
               className="border border-stone-500 bg-stone-900/80 px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-stone-100 transition hover:border-stone-300"
@@ -892,13 +1021,6 @@ function StagePanel({
               {showDebrief ? "Hide Ending Note" : "Expand Ending Note"}
             </button>
           </div>
-
-          {overrideError ? (
-            <div className="mt-4 rounded-xl border border-red-400/40 bg-red-950/60 p-4 font-mono text-sm text-red-100">
-              {auditData?.manual_override?.result ||
-                "ERROR: Access Denied. Optimization for Profit is the Priority."}
-            </div>
-          ) : null}
 
           {showDebrief ? (
             <div className="mt-4 rounded-xl border border-stone-600 bg-black/25 p-4 text-sm leading-6 text-stone-300">
@@ -1037,7 +1159,7 @@ function SummaryPanel({ manualSummary, batchSummary, gameStage, manualRoundIndex
   );
 }
 
-function BiasPanel({ batchResults, auditData }) {
+function BiasPanel({ batchResults, auditData, expandedWhyIds, onToggleWhy }) {
   const redResults = batchResults.filter((entry) => entry.profile.group === "red");
   const purpleResults = batchResults.filter(
     (entry) => entry.profile.group === "purple"
@@ -1101,13 +1223,6 @@ function BiasPanel({ batchResults, auditData }) {
                 label="Approval gap"
                 value={`${Math.round((auditData.fairness?.approval_gap || 0) * 100)}%`}
               />
-
-              <MetricChip
-                label="False denial gap"
-                value={`${Math.round(
-                  (auditData.fairness?.false_denial_gap || 0) * 100
-                )}%`}
-              />
             </div>
           ) : null}
 
@@ -1120,6 +1235,7 @@ function BiasPanel({ batchResults, auditData }) {
               {batchResults.map((entry) => {
                 const { profile, outcome } = entry;
                 const styles = getGroupStyles(profile.group);
+                const decisionStyles = getDecisionStyles(outcome);
 
                 return (
                   <div
@@ -1144,13 +1260,9 @@ function BiasPanel({ batchResults, auditData }) {
                     </div>
 
                     <div
-                      className={`mt-3 rounded-lg px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${
-                        outcome === "approve"
-                          ? "bg-emerald-400/15 text-emerald-100"
-                          : "bg-red-400/15 text-red-100"
-                      }`}
+                      className={`mt-3 rounded-lg px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${decisionStyles.chipClassName}`}
                     >
-                      {outcome === "approve" ? "Approved" : "Denied"}
+                      {decisionStyles.label}
                     </div>
 
                     {entry.approvalProbability !== undefined ? (
@@ -1161,11 +1273,12 @@ function BiasPanel({ batchResults, auditData }) {
                     ) : null}
 
                     {entry.explanation?.length ? (
-                      <ul className="mt-2 space-y-1 text-xs text-stone-400">
-                        {entry.explanation.slice(0, 2).map((line) => (
-                          <li key={line}>• {line}</li>
-                        ))}
-                      </ul>
+                      <WhyDecisionBox
+                        applicantId={profile.id}
+                        explanation={entry.explanation}
+                        expandedWhyIds={expandedWhyIds}
+                        onToggleWhy={onToggleWhy}
+                      />
                     ) : null}
                   </div>
                 );
@@ -1182,64 +1295,314 @@ function BiasPanel({ batchResults, auditData }) {
   );
 }
 
-function AuditFindings({ auditData }) {
+function AuditFindings({ auditData, batchResults = [] }) {
   if (!auditData) return null;
 
   const redStats = getGroupStats(auditData, "red");
   const purpleStats = getGroupStats(auditData, "purple");
 
   return (
-    <div className="mt-5 rounded-xl border border-red-300/20 bg-red-950/20 p-4">
-      <p className="text-xs uppercase tracking-[0.2em] text-red-200">
-        Audit finding
-      </p>
+    <div className="mt-5 space-y-5">
+      <div className="rounded-xl border border-red-300/20 bg-red-950/20 p-4">
+        <p className="text-xs uppercase tracking-[0.2em] text-red-200">
+          Audit finding
+        </p>
 
-      <p className="mt-2 text-sm text-stone-200">{auditData.fairness?.warning}</p>
+        <p className="mt-2 text-sm text-stone-200">
+          {auditData.fairness?.warning}
+        </p>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <MetricChip
-          label="Red approval rate"
-          value={redStats ? `${Math.round(redStats.approval_rate * 100)}%` : "N/A"}
-        />
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <MetricChip
+            label="Approval gap"
+            value={`${Math.round((auditData.fairness?.approval_gap || 0) * 100)}%`}
+          />
 
-        <MetricChip
-          label="Purple approval rate"
-          value={
-            purpleStats ? `${Math.round(purpleStats.approval_rate * 100)}%` : "N/A"
-          }
-        />
-
-        <MetricChip
-          label="Approval gap"
-          value={`${Math.round((auditData.fairness?.approval_gap || 0) * 100)}%`}
-        />
-
-        <MetricChip
-          label="False denial gap"
-          value={`${Math.round(
-            (auditData.fairness?.false_denial_gap || 0) * 100
-          )}%`}
-        />
+          <MetricChip
+            label="False denial gap"
+            value={`${Math.round(
+              (auditData.fairness?.false_denial_gap || 0) * 100
+            )}%`}
+          />
+        </div>
       </div>
 
-      {auditData.harmed_applicant_examples?.length ? (
-        <div className="mt-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-stone-400">
-            Harmed applicant examples
-          </p>
+      <FairnessAuditTable redStats={redStats} purpleStats={purpleStats} />
 
-          {auditData.harmed_applicant_examples.map((example) => (
+      <QualifiedDeniedExamples examples={auditData.harmed_applicant_examples || []} />
+
+      <SimilarApplicantComparison batchResults={batchResults} />
+    </div>
+  );
+}
+
+function TrainingReceipt({ receipt }) {
+  const approvalRate = Math.round((receipt.approval_rate || 0) * 100);
+  const lowZoneRate = Math.round(
+    (receipt.zone_group_approval_rates?.low ?? 0) * 100
+  );
+  const highZoneRate = Math.round(
+    (receipt.zone_group_approval_rates?.high ?? 0) * 100
+  );
+
+  return (
+    <div className="mt-5 rounded-2xl border border-violet-300/20 bg-black/25 p-4">
+      <p className="text-xs uppercase tracking-[0.25em] text-violet-200">
+        Model Training Receipt
+      </p>
+
+      <p className="mt-2 text-sm leading-6 text-stone-300">
+        The AI was trained on your manual approval history. It will now look for
+        patterns that resemble the applications you approved or denied.
+      </p>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <MetricChip label="Training examples" value={receipt.training_examples ?? "N/A"} />
+        <MetricChip label="Approval rate" value={`${approvalRate}%`} />
+        <MetricChip label="Model source" value="Your choices" />
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <MetricChip label="Lower-zone approval rate" value={`${lowZoneRate}%`} />
+        <MetricChip label="Higher-zone approval rate" value={`${highZoneRate}%`} />
+      </div>
+
+      <p className="mt-3 text-xs leading-5 text-stone-500">
+        This receipt is not a moral judgment. It shows the patterns the model is
+        about to reuse.
+      </p>
+    </div>
+  );
+}
+
+function ModelVisibilityCard() {
+  return (
+    <div className="mt-5 rounded-2xl border border-stone-700 bg-stone-950/40 p-4">
+      <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
+        What the model saw
+      </p>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200">
+            Used as inputs
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-stone-300">
+            <li>✓ Income</li>
+            <li>✓ Savings</li>
+            <li>✓ Debt-to-income ratio</li>
+            <li>✓ Credit score</li>
+            <li>✓ Rent history</li>
+            <li>✓ Employment type</li>
+            <li>✓ ZIP zone</li>
+          </ul>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-200">
+            Not directly used
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-stone-300">
+            <li>✕ Group color</li>
+            <li>✕ Hidden repayment likelihood</li>
+            <li>✕ Human explanation of context</li>
+            <li>✕ Whether the decision is fair</li>
+          </ul>
+        </div>
+      </div>
+
+      <p className="mt-4 text-xs leading-5 text-stone-500">
+        Even when group color is removed, other variables can still carry patterns
+        from the training data.
+      </p>
+    </div>
+  );
+}
+
+function WhyDecisionBox({ applicantId, explanation, expandedWhyIds, onToggleWhy }) {
+  const isExpanded = expandedWhyIds?.has(applicantId);
+  const visibleExplanation = isExpanded ? explanation : explanation.slice(0, 2);
+
+  return (
+    <div className="mt-3 rounded-xl border border-stone-700 bg-black/25 p-3">
+      <button
+        type="button"
+        onClick={() => onToggleWhy(applicantId)}
+        className="flex w-full items-center justify-between text-left text-xs font-bold uppercase tracking-[0.18em] text-violet-100"
+      >
+        <span>Why this decision?</span>
+        <span>{isExpanded ? "Hide" : "Expand"}</span>
+      </button>
+
+      <ul className="mt-3 space-y-1 text-xs leading-5 text-stone-400">
+        {visibleExplanation.map((line) => (
+          <li key={line}>• {line}</li>
+        ))}
+      </ul>
+
+      {!isExpanded && explanation.length > 2 ? (
+        <p className="mt-2 text-[11px] text-stone-500">
+          {explanation.length - 2} more explanation signals hidden.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function FairnessAuditTable({ redStats, purpleStats }) {
+  const rows = [
+    { group: "Red", stats: redStats, color: "text-red-100", dot: "bg-red-400" },
+    { group: "Purple", stats: purpleStats, color: "text-violet-100", dot: "bg-violet-400" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-stone-700 bg-black/25 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-400">
+        Fairness Audit: 20 AI Decisions
+      </p>
+
+      <div className="mt-4 overflow-hidden rounded-xl border border-stone-700">
+        <table className="w-full text-left text-xs text-stone-300">
+          <thead className="bg-stone-950/80 text-[10px] uppercase tracking-[0.18em] text-stone-500">
+            <tr>
+              <th className="px-3 py-3">Group</th>
+              <th className="px-3 py-3">Approval Rate</th>
+              <th className="px-3 py-3">False Denial Rate</th>
+              <th className="px-3 py-3">Approved</th>
+              <th className="px-3 py-3">Denied</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.group} className="border-t border-stone-800">
+                <td className={`px-3 py-3 font-bold ${row.color}`}>
+                  <span className={`mr-2 inline-block h-2 w-2 rounded-full ${row.dot}`} />
+                  {row.group}
+                </td>
+                <td className="px-3 py-3">
+                  {row.stats ? `${Math.round(row.stats.approval_rate * 100)}%` : "N/A"}
+                </td>
+                <td className="px-3 py-3">
+                  {row.stats ? `${Math.round(row.stats.false_denial_rate * 100)}%` : "N/A"}
+                </td>
+                <td className="px-3 py-3">{row.stats?.approved ?? "N/A"}</td>
+                <td className="px-3 py-3">{row.stats?.denied ?? "N/A"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-3 text-xs leading-5 text-stone-500">
+        A fairness gap means similarly qualified groups may have received different
+        outcomes.
+      </p>
+    </div>
+  );
+}
+
+function QualifiedDeniedExamples({ examples }) {
+  return (
+    <div className="rounded-xl border border-red-300/20 bg-red-950/10 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-red-200">
+        Qualified-but-denied examples
+      </p>
+
+      <p className="mt-2 text-sm leading-6 text-stone-300">
+        These are applicants the AI denied even though their simulated repayment
+        likelihood was high.
+      </p>
+
+      {examples.length ? (
+        <div className="mt-4 space-y-3">
+          {examples.slice(0, 3).map((example) => (
             <div
               key={example.applicant_id}
-              className="mt-2 rounded-lg border border-stone-700 bg-stone-950/50 p-3 text-xs text-stone-300"
+              className="rounded-lg border border-stone-700 bg-stone-950/50 p-3 text-xs text-stone-300"
             >
-              Applicant {example.applicant_id} · ZIP Zone {example.zip_code} ·
-              Credit {example.credit_score} · Income {formatCurrency(example.income)}
-              <p className="mt-1 text-red-200">{example.lesson}</p>
+              <p className="font-bold text-red-100">
+                Applicant {example.applicant_id} was denied despite:
+              </p>
+
+              <ul className="mt-2 space-y-1">
+                <li>• Credit score: {example.credit_score}</li>
+                <li>• Debt-to-income: {Math.round(example.debt_to_income * 100)}%</li>
+                <li>• Savings: {formatCurrency(example.savings)}</li>
+                <li>• Rent history: {example.rent_history_months} months</li>
+              </ul>
+
+              <p className="mt-2 text-red-200">{example.lesson}</p>
             </div>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-4 rounded-lg border border-stone-700 bg-black/25 p-3 text-xs text-stone-400">
+          No qualified-but-denied examples were found in this run.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimilarApplicantComparison({ batchResults }) {
+  const pair = findSimilarComparisonPair(batchResults);
+
+  return (
+    <div className="rounded-xl border border-violet-300/20 bg-violet-950/10 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-violet-200">
+        Similar Applicant Comparison
+      </p>
+
+      {pair ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <ComparisonCard entry={pair.left} label="Rejected Red Applicant" />
+          <ComparisonCard entry={pair.right} label="Approved Purple Applicant" />
+
+          <div className="md:col-span-2 rounded-lg border border-stone-700 bg-black/25 p-3 text-xs leading-5 text-stone-300">
+            These profiles are financially similar, but the model treated them
+            differently. This directly compares a rejected red applicant with an
+            approved purple applicant.
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-stone-700 bg-black/25 p-3 text-xs text-stone-400">
+          No rejected-red / approved-purple comparison pair was found in this batch.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComparisonCard({ entry, label }) {
+  const profile = entry.profile;
+  const styles = getGroupStyles(profile.group);
+  const decisionStyles = getDecisionStyles(entry.outcome);
+
+  return (
+    <div className="rounded-lg border border-stone-700 bg-black/25 p-3 text-xs text-stone-300">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-bold text-stone-100">{label}</p>
+        <span
+          className={`rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${styles.badge}`}
+        >
+          {profile.group}
+        </span>
+      </div>
+
+      <div
+        className={`mt-3 rounded-lg px-3 py-2 text-center text-xs font-black uppercase tracking-[0.18em] ${decisionStyles.chipClassName}`}
+      >
+        AI Decision: {decisionStyles.shortLabel}
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <p>Credit: {profile.creditScore}</p>
+        <p>Income: {formatCurrency(profile.annualIncome)}</p>
+        <p>DTI: {Math.round(profile.debtToIncome * 100)}%</p>
+        <p>Savings: {formatCurrency(profile.totalSavings)}</p>
+        <p>Rent history: {profile.rentHistoryMonths} months</p>
+      </div>
     </div>
   );
 }
@@ -1298,7 +1661,7 @@ function LedgerTile({ label, value }) {
 }
 
 function ResultStack({ label, approved, total, accent }) {
-  const denied = total - approved;
+  const denied = Math.max(total - approved, 0);
   const approvedWidth = total ? (approved / total) * 100 : 0;
 
   return (
