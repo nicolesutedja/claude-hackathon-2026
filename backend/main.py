@@ -191,7 +191,6 @@ def audit_model():
 
     return {
         "stage": "audit_and_cliffhanger",
-        "news_ticker": "Investigation finds bank AI is blacklisting applicants from low-income ZIP codes.",
         "manual_override": {
             "attempted": True,
             "result": "ERROR: Access Denied. Optimization for Profit is the Priority.",

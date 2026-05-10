@@ -721,15 +721,6 @@ function HomePage() {
           </div>
         </div>
 
-        {/* 4. News Ticker (Only at Audit Stage) */}
-        {gameStage === "audit" && (
-          <div className="mt-6 overflow-hidden rounded-2xl border border-red-300/20 bg-black/40">
-            <div className="animate-pulse whitespace-nowrap px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-red-200">
-              {auditData?.news_ticker ||
-                "Investigation finds the bank’s approval system favors certain applicants, even when others have similar financial profiles."}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -845,7 +836,7 @@ function StagePanel({
         <div className="mb-5 flex flex-col gap-3 border-b border-stone-700/80 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="mt-1 text-2xl font-black text-stone-50">
-              Start approving or denying applicants now.
+              Approve or Deny this Applicant.
             </h2>
           </div>
 
